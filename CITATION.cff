@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+title: hashrate-filter
+message: >-
+  If you use the hashrate filter, the shipped reference series, or results
+  produced with them in research, please cite the paper below.
+type: software
+version: 0.1.0
+authors:
+  - family-names: Wüstenfeld
+    given-names: Jan
+    affiliation: Melanion GreenTech
+  - family-names: Geldner
+    given-names: Teo
+    affiliation: FernUniversität in Hagen
+repository-code: https://github.com/janwuestenfeld/hashrate-filter
+license: MIT
+preferred-citation:
+  type: unpublished
+  title: >-
+    Bitcoin hashrate dynamics: Poisson-luck hashrate and fee corrections,
+    and hashrate determinants — a TVP-SVAR-SV analysis
+  authors:
+    - family-names: Wüstenfeld
+      given-names: Jan
+      affiliation: Melanion GreenTech
+    - family-names: Geldner
+      given-names: Teo
+      affiliation: FernUniversität in Hagen
+  year: 2026
+  notes: Working paper.

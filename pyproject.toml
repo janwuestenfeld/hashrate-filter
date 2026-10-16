@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hashrate-filter"
+version = "0.1.0"
+description = "One-sided and two-sided state-space filter of the daily Bitcoin network hashrate, with protocol-fixed observation noise"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Jan Wüstenfeld" }, { name = "Teo Geldner" }]
+keywords = ["bitcoin", "hashrate", "state-space", "kalman", "measurement"]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "scipy>=1.10",
+]
+
+[project.optional-dependencies]
+examples = ["matplotlib>=3.7", "pyarrow>=14"]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/janwuestenfeld/hashrate-filter"
+
+[tool.setuptools.packages.find]
+include = ["hashrate_filter*"]
