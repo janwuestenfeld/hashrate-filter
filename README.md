@@ -2,7 +2,7 @@
 
 A Python package that estimates the daily Bitcoin network hashrate from
 block data and removes most of the luck in block discovery. It implements
-the hashrate filter of Wüstenfeld and Geldner (2026) and runs on any daily
+the hashrate filter of Wüstenfeld and Geldner (2025) and runs on any daily
 block series with per-block timestamps and difficulty.
 
 Bitcoin's hashrate has to be inferred from how many blocks the network
@@ -352,19 +352,20 @@ monotone and bounded; and that a partial final day warns.
 
 If you use the package or the reference series, please cite the paper:
 
-> Wüstenfeld, J. and Geldner, T. (2026). Bitcoin hashrate dynamics:
-> Poisson-luck hashrate and fee corrections, and hashrate determinants — a
-> TVP-SVAR-SV analysis. SSRN Working Paper 5786322.
+> Wüstenfeld, J. and Geldner, T. (2025). Bitcoin hashrate dynamics:
+> filtering Poisson-luck and identifying responses to price and fees. SSRN
+> Working Paper 5786322.
 > https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322
 
 ```bibtex
-@misc{wustenfeld_geldner_2026_hashrate,
+@misc{wustenfeld_geldner_2025_hashrate,
   author = {W{\"u}stenfeld, Jan and Geldner, Teo},
-  title  = {Bitcoin hashrate dynamics: {Poisson}-luck hashrate and fee
-            corrections, and hashrate determinants --- a {TVP-SVAR-SV} analysis},
-  year   = {2026},
+  title  = {Bitcoin hashrate dynamics: filtering {Poisson}-luck and
+            identifying responses to price and fees},
+  year   = {2025},
   note   = {SSRN Working Paper 5786322},
-  url    = {https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322}
+  url    = {https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322},
+  doi    = {10.2139/ssrn.5786322}
 }
 ```
 

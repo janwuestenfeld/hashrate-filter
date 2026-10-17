@@ -17,8 +17,8 @@ license: MIT
 preferred-citation:
   type: unpublished
   title: >-
-    Bitcoin hashrate dynamics: Poisson-luck hashrate and fee corrections,
-    and hashrate determinants — a TVP-SVAR-SV analysis
+    Bitcoin hashrate dynamics: filtering Poisson-luck and identifying
+    responses to price and fees
   authors:
     - family-names: Wüstenfeld
       given-names: Jan
@@ -26,6 +26,7 @@ preferred-citation:
     - family-names: Geldner
       given-names: Teo
       affiliation: FernUniversität in Hagen
-  year: 2026
+  year: 2025
   notes: SSRN Working Paper 5786322.
   url: https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322
+  doi: 10.2139/ssrn.5786322
