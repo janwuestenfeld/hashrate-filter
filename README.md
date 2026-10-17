@@ -354,7 +354,8 @@ If you use the package or the reference series, please cite the paper:
 
 > Wüstenfeld, J. and Geldner, T. (2026). Bitcoin hashrate dynamics:
 > Poisson-luck hashrate and fee corrections, and hashrate determinants — a
-> TVP-SVAR-SV analysis. Working paper.
+> TVP-SVAR-SV analysis. SSRN Working Paper 5786322.
+> https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322
 
 ```bibtex
 @misc{wustenfeld_geldner_2026_hashrate,
@@ -362,7 +363,8 @@ If you use the package or the reference series, please cite the paper:
   title  = {Bitcoin hashrate dynamics: {Poisson}-luck hashrate and fee
             corrections, and hashrate determinants --- a {TVP-SVAR-SV} analysis},
   year   = {2026},
-  note   = {Working paper}
+  note   = {SSRN Working Paper 5786322},
+  url    = {https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322}
 }
 ```
 
