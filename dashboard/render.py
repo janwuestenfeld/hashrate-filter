@@ -323,17 +323,17 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
       <div class="tile">
         <div class="k">Raw estimate</div>
         <div class="v">$RAW <span class="u">EH/s</span></div>
-        <div class="s">$RAW_GAP our filter</div>
+        <div class="s"><span class="chg $RG_CLS">$RG</span> vs our filter</div>
       </div>
       <div class="tile">
         <div class="k">7-day average</div>
         <div class="v">$MA7 <span class="u">EH/s</span></div>
-        <div class="s">$MA7_GAP our filter</div>
+        <div class="s"><span class="chg $MG_CLS">$MG</span> vs our filter</div>
       </div>
       <div class="tile">
         <div class="k">Blocks found</div>
         <div class="v">$N <span class="u">blocks</span></div>
-        <div class="s">$LAM expected* (target 144); luck alone gives $N_LO to $N_HI on 95% of days</div>
+        <div class="s"><span class="chg $NG_CLS">$NG</span> vs $LAM expected* (target 144)<br>luck alone gives $N_LO to $N_HI on 95% of days</div>
       </div>
     </div>
     <p class="note">* Bitcoin targets 144 blocks a day. At the difficulty of $AS_OF the network finds exactly 144 a day at $H144 EH/s. On $PREV_DATE, the day before, our filter put the hashrate at $PURE_PREV EH/s, so $LAM blocks were expected for $AS_OF.</p>
@@ -579,7 +579,7 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
                     + ("because the hashrate is slightly below the level the current difficulty was set for." if st["lam"] < 143.5 else
                        "because the hashrate is slightly above the level the current difficulty was set for." if st["lam"] > 144.5 else
                        "in line with the target.")), "LAM_H": f"{st['lam'] / 24:.1f}", "H_LO": str(st["h_lo"]), "H_HI": str(st["h_hi"]),
-        "D1": fmt_pct(st["d1"]), "D1_CLS": chg_cls(st["d1"]), "D7_CLS": chg_cls(st["d7"]), "D7": fmt_pct(st["d7"]), "G_BAND": f"{1.96 * PAPER['growth_unc']:.1f}%",
+        "D1": fmt_pct(st["d1"]), "D1_CLS": chg_cls(st["d1"]), "RG": fmt_pct(100 * (st["raw"] / st["pure"] - 1)), "RG_CLS": chg_cls(100 * (st["raw"] / st["pure"] - 1)), "MG": fmt_pct(100 * (st["ma7"] / st["pure"] - 1)), "MG_CLS": chg_cls(100 * (st["ma7"] / st["pure"] - 1)), "NG": (lambda k: ("+" if k > 0 else "−" if k < 0 else "±") + str(abs(k)))(st["n"] - round(st["lam"])), "NG_CLS": chg_cls(st["n"] - round(st["lam"])), "D7_CLS": chg_cls(st["d7"]), "D7": fmt_pct(st["d7"]), "G_BAND": f"{1.96 * PAPER['growth_unc']:.1f}%",
         "SD_RAW": PAPER["sd_raw"], "SD_FILTER": PAPER["sd_filter"], "NOISE_SHARE": PAPER["noise_share"],
         "LUCK_FULL": PAPER["luck_full"], "LUCK_2016": PAPER["luck_2016"],
         "SD_R": f"{st['sd']['raw']:.1f}%", "SD_3": f"{st['sd']['ma3']:.1f}%", "SD_7": f"{st['sd']['ma7']:.1f}%", "SD_F": f"{st['sd']['pure']:.1f}%", "SD_T": f"{st['sd']['pure_two_sided']:.1f}%",
