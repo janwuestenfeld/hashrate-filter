@@ -12,7 +12,7 @@ html{scroll-behavior:smooth}
 body{background:#fff;color:var(--text);font-family:var(--body);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
 a{color:var(--f-dark);text-decoration:none;border-bottom:1px solid rgb(194,98,42,.35)}
 a:hover{border-bottom-color:var(--f-dark)}
-.wrap{max-width:1080px;margin:0 auto;padding:0 32px}
+.wrap{max-width:920px;margin:0 auto;padding:0 32px}
 .hidden{display:none}
 
 /* top bar */
@@ -35,10 +35,10 @@ h1{font-family:var(--disp);font-weight:700;font-size:40px;line-height:1.15;lette
 h1 .ac{color:var(--f)}
 .freshness{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:6px}
 .freshness span{color:var(--dim)}
-.tagline{font-family:var(--disp);font-weight:600;font-size:22px;line-height:1.35;color:var(--ink);max-width:860px;margin-top:22px}
+.tagline{font-family:var(--disp);font-weight:600;font-size:22px;line-height:1.35;color:var(--ink);margin-top:22px}
 .hero .lede{color:var(--dim);margin-top:12px}
 .tiles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:28px;scroll-margin-top:70px}
-.tiles.two{grid-template-columns:1fr 1fr;max-width:760px}
+.tiles.two{grid-template-columns:1fr 1fr}
 .tile{border:1px solid var(--rule);border-radius:10px;padding:16px 18px}
 .tile .k{font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:500;text-transform:uppercase;letter-spacing:.08em}
 .tile .v{font-family:var(--mono);font-weight:600;font-size:28px;color:var(--ink);line-height:1.2;margin-top:6px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
@@ -53,8 +53,8 @@ h2{font-family:var(--disp);font-weight:700;font-size:26px;line-height:1.25;color
 h2.gap{margin-top:64px}
 h3{font-family:var(--disp);font-weight:600;font-size:20px;line-height:1.3;color:var(--ink);margin-top:56px}
 .eyebrow{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--dim);text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px}
-.lede{max-width:840px;margin-top:12px;color:var(--text)}
-.note{font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--dim);margin-top:10px;max-width:840px}
+.lede{margin-top:12px;color:var(--text)}
+.note{font-size:14px;line-height:1.6;color:var(--dim);margin-top:10px}
 .fig{border:1px solid var(--rule);border-radius:10px;background:#FAFAFB;padding:12px 14px 8px;margin-top:18px}
 .chart{width:100%}
 .chart.tall{height:600px}.chart.mid{height:400px}.chart.short{height:330px}
@@ -77,11 +77,11 @@ table.cmp tr.f td{color:var(--ink);font-weight:600}
 table.cmp tr.f td:first-child{color:var(--f-dark)}
 
 /* big numbers */
-.nums{display:flex;gap:48px;margin-top:18px;flex-wrap:wrap}
+.nums{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:22px}
 .nums div{display:flex;flex-direction:column}
 .nums .v{font-family:var(--mono);font-weight:600;font-size:44px;line-height:1.1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-.nums .v.grey{color:var(--faint)}.nums .v.ac{color:var(--f)}.nums .v.tw{color:var(--two)}
-.nums .k{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-top:4px}
+.nums .v.grey{color:var(--ink)}.nums .v.ac{color:var(--f)}.nums .v.tw{color:var(--two)}
+.nums .k{font-size:14px;line-height:1.45;color:var(--dim);margin-top:6px}
 
 /* data */
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:8px}
@@ -102,7 +102,7 @@ details summary::after{content:"\203A";font-size:13px;transition:transform .15s}
 details[open] summary::after{transform:rotate(90deg)}
 details summary:hover{color:var(--ink);background:var(--alt)}
 details[open] summary{color:var(--ink);border-color:var(--ink)}
-details p{margin-top:12px;font-size:15px;color:var(--dim);max-width:860px}
+details p{margin-top:12px;font-size:15px;color:var(--dim)}
 details.how{margin-top:64px}
 
 footer{padding:28px 0 60px;font-size:14px;color:var(--dim);border-top:1px solid var(--rule)}
@@ -122,7 +122,7 @@ footer .fine{font-family:var(--mono);font-size:12px;color:var(--faint);margin-to
   .tile{padding:14px 16px}
   .tile .v{font-size:26px}
   h2{font-size:22px} h3{font-size:18px;margin-top:40px}
-  .nums{gap:28px}.nums .v{font-size:34px}
+  .nums{grid-template-columns:1fr;gap:20px}.nums .v{font-size:34px}
   .sec{padding:24px 0 44px}
   .fig{padding:8px 6px 4px;border-radius:8px}
   .chart.tall{height:560px}.chart.mid{height:380px}.chart.short{height:330px}

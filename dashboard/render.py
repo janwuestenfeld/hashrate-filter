@@ -298,7 +298,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
     <h1>Bitcoin Hashrate <span class="ac">Filter</span></h1>
     <div class="byline">by <a href="$JAN_URL" target="_blank" rel="noopener">Dr. Jan Wüstenfeld<span class="ext"> (homepage&nbsp;↗)</span></a> and <a href="$TEO_URL" target="_blank" rel="noopener">Teo Geldner<span class="ext"> (LinkedIn&nbsp;↗)</span></a> · <a href="$PAPER_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-paper">Paper<span class="ext"> (SSRN&nbsp;↗)</span></a> · <a href="$REPO_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-code">Code<span class="ext"> (GitHub&nbsp;↗)</span></a></div>
     <div class="freshness">Updated daily from public block data · last updated <span>$UPDATED</span></div>
-    <div class="tagline">Bitcoin's daily hashrate moves are mostly luck. We built a filter that removes it, using the protocol's own rules.</div>
+    <div class="tagline">Bitcoin's daily hashrate moves are mostly luck. We built a filter that removes it, using the protocol's own rules, without the lag of a moving average.</div>
     <p class="lede">Every daily hashrate figure comes from the number of blocks found that day and the difficulty. Blocks arrive at random, as a Poisson process, so the raw estimate moves by about $SD_RAW from one day to the next even when the hashrate stays the same. Moving averages damp these swings, but when a lucky day leaves their window the average falls although the hashrate did not change. We are the first to remove the luck without a smoothing window, using the size of Poisson luck at each day's block count and the times at which the day's blocks arrive. Since 2016 our filter removes $LUCK_2016 of this luck.</p>
     <div class="tiles two" id="live">
       <div class="tile main">
@@ -317,7 +317,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <section class="sec">
   <div class="wrap">
     <h2>Our filter follows the hashrate without the daily luck of the raw estimate</h2>
-    <p class="lede">Grey dots are the raw estimate, the orange line is our filter and the dotted line the 3-day average. The 7-day average is hidden, and you can show it by clicking it in the legend. Drag across the chart to zoom, and use the bar below it to move through the history since 2011.</p>
+    <p class="lede">Grey dots are the raw estimate, the orange line is our filter and the dotted line the 3-day average. The 7-day average is hidden, and you can show it by clicking it in the legend. Drag across the chart to zoom, double-click to zoom out, and use the buttons below it to show the history since 2011.</p>
     <figure class="fig"><div id="ch-main" class="chart tall"></div></figure>
     <p class="note">The green line is the two-sided version of our filter. It also uses the following seven days, so its last seven days (shaded, dotted) are not final and change as new days come in. Use the orange line for real-time work and the green line to look back at history. All other lines never change once published.</p>
   </div>
@@ -345,9 +345,9 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
     <h2>Download the series</h2>
     <div class="cols">
       <div>
-        <p class="lede">We add one row per UTC day, from 1 January 2011, once the day is complete. Published values never change, except the last seven days of the two-sided version of our filter.</p>
+        <p class="lede">The full daily series since 2011, updated every day.</p>
         <ul class="dl">
-          <li><a href="data/daily.csv" download data-goatcounter-click="data-csv">data/daily.csv</a> <span>the full daily series</span></li>
+          <li><a href="data/daily.csv" download data-goatcounter-click="data-csv">data/daily.csv</a> <span>every series, one row per day</span></li>
           <li><a href="data/latest.json" data-goatcounter-click="data-json">data/latest.json</a> <span>values for the latest complete day</span></li>
           <li><a href="data/README.txt" data-goatcounter-click="data-readme">data/README.txt</a> <span>what each column means</span></li>
           <li><a href="share.png" download="hashrate-filter_$AS_OF_ISO.png" data-goatcounter-click="data-png">share.png</a> <span>the latest chart as an image</span></li>
@@ -380,12 +380,12 @@ var C = {ink:'#0B0B0D', dim:'#5C616B', grid:'#F3F4F6', raw:'#AEB2BA', ma3:'#3E43
 var F = {family:"'JetBrains Mono', monospace", size:11, color:'#5C616B'};
 var narrow = window.innerWidth < 640;
 var MARKTXT = narrow ? H.mark : H.mark + ' · janwuestenfeld.github.io/hashrate-filter';
-var mark = function(y){ return {text:MARKTXT, showarrow:false, xref:'paper', yref:'paper', x:1, y:(y||0), xanchor:'right', yanchor:'bottom',
-  xshift:-4, yshift:4, bgcolor:'rgba(255,255,255,0.88)', borderpad:3, font:{size:narrow?11:12, color:'#3E4350', family:F.family}}; };
+var mark = function(y){ return {text:MARKTXT, showarrow:false, xref:'paper', yref:'paper', x:1, y:0, xanchor:'right', yanchor:'top',
+  yshift:-(y||26), font:{size:narrow?10:11, color:'#80858F', family:F.family}}; };
 var base = function(){ return {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:F, hovermode:'x unified', showlegend:true,
   hoverlabel:{font:{family:F.family, size:12}},
   legend:{orientation:'h', x:1, xanchor:'right', y:1.0, yanchor:'bottom', font:{size:11}, itemclick:false, itemdoubleclick:false},
-  margin:{l:56, r:12, t:40, b:40},
+  margin:{l:56, r:12, t:40, b:64},
   xaxis:{gridcolor:C.grid, linecolor:'#DADCE0', tickfont:{size:11}}, yaxis:{gridcolor:C.grid, zerolinecolor:'#D5D7DB', tickfont:{size:11}}}; };
 var head = function(L, title, short){
   if (narrow){ L.title = {text:''}; L.legend = Object.assign(L.legend, {x:0, xanchor:'left', y:1.0, yanchor:'bottom', entrywidth:0.5, entrywidthmode:'fraction'}); L.margin.t = 74; }
@@ -418,11 +418,14 @@ var P0 = N - H.lag;   // first preliminary day of the two-sided line
   var yr = function(a0, a1){ var lo=Infinity, hi=-Infinity;
     for (var i=0;i<N;i++){ if (D[i]<a0 || D[i]>a1) continue; lo=Math.min(lo,H.raw[i]||Infinity,H.pure[i]); hi=Math.max(hi,H.raw[i]||-Infinity,H.pure[i]); }
     return [lo*0.96, hi*1.03]; };
-  L.xaxis = Object.assign(L.xaxis, {range:[D[i0], D[N-1]], rangeslider:{visible:true, thickness:0.09, bgcolor:'#F7F7F8'}, type:'date'});
+  L.xaxis = Object.assign(L.xaxis, {range:[D[i0], D[N-1]], type:'date',
+    rangeselector:{x:0, xanchor:'left', y:-0.07, yanchor:'top', bgcolor:'#fff', activecolor:'#ECEDEF', bordercolor:'#DADCE0', borderwidth:1, font:{size:11},
+      buttons:[{count:6, label:'6M', step:'month', stepmode:'backward'}, {count:1, label:'1Y', step:'year', stepmode:'backward'},
+               {count:5, label:'5Y', step:'year', stepmode:'backward'}, {step:'all', label:'All'}]}});
   L.yaxis = Object.assign(L.yaxis, {title:{text:'EH/s', font:{size:11}}, range:yr(D[i0], D[N-1]), fixedrange:false});
-  L.margin.b = 30;
+  L.margin.b = 72;
   head(L, 'Bitcoin network hashrate to '+H.asof_txt);
-  L.annotations = [mark(0.12), {x:D[N-1], y:1, xref:'x', yref:'paper', xanchor:'right', yanchor:'top', showarrow:false, text:'two-sided version: last '+H.lag+' days not final', font:{size:11, color:C.two}}];
+  L.annotations = [mark(30), {x:D[N-1], y:1, xref:'x', yref:'paper', xanchor:'right', yanchor:'top', showarrow:false, text:'two-sided version: last '+H.lag+' days not final', font:{size:11, color:C.two}}];
   Plotly.newPlot('ch-main', T, L, cfg('main'));
   var el = document.getElementById('ch-main'), busy = false;
   el.on('plotly_relayout', function(ev){
@@ -464,7 +467,7 @@ var P0 = N - H.lag;   // first preliminary day of the two-sided line
   head(L, 'Hashrate in the 2021 China mining ban: our filter, 7-day average and raw estimate');
   L.annotations=[mark()]; L.shapes=[];
   L.shapes.push({type:'line', xref:'paper', yref:'y', x0:0, x1:1, y0:H.ban.half, y1:H.ban.half, line:{color:C.dim, width:1, dash:'dot'}});
-  L.annotations.push({x:1, y:H.ban.half, xref:'paper', yref:'y', xanchor:'right', yanchor:'bottom', showarrow:false, text:'half of the fall, '+Math.round(H.ban.half)+' EH/s', font:{size:11, color:C.dim}});
+  L.annotations.push({x:1, y:H.ban.half, xref:'paper', yref:'y', xanchor:'right', yanchor:'top', showarrow:false, text:'half of the fall, '+Math.round(H.ban.half)+' EH/s', font:{size:11, color:C.dim}});
   var g=H.ban.gapD;
   L.shapes.push({type:'line', xref:'x', yref:'y', x0:g, x1:g, y0:H.ban.gapF, y1:H.ban.gap7, line:{color:C.ink, width:1.5}});
   L.annotations.push({x:g, y:H.ban.gap7, xref:'x', yref:'y', xanchor:'left', yanchor:'bottom', xshift:6, showarrow:false,
