@@ -285,8 +285,8 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <meta property="og:url" content="$SITE_URL">
 <meta property="og:title" content="Bitcoin Hashrate Filter: Removing the Daily Poisson Luck">
 <meta property="og:description" content="$DESC">
-<meta property="og:image" content="${SITE_URL}og-card.png">
-<meta property="og:image:secure_url" content="${SITE_URL}og-card.png">
+<meta property="og:image" content="${SITE_URL}og-card.png?d=$AS_OF_ISO">
+<meta property="og:image:secure_url" content="${SITE_URL}og-card.png?d=$AS_OF_ISO">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
@@ -295,7 +295,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Bitcoin Hashrate Filter: Removing the Daily Poisson Luck">
 <meta name="twitter:description" content="$DESC">
-<meta name="twitter:image" content="${SITE_URL}og-card.png">
+<meta name="twitter:image" content="${SITE_URL}og-card.png?d=$AS_OF_ISO">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
