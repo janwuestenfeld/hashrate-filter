@@ -1,298 +1,131 @@
-/* ==========================================================================
-   BTC Wedge Dashboard — Styles · FRESH redesign (mockup design language)
-   Same class names as before so HTML + JS wiring is untouched. Fonts kept:
-   Space Grotesk (display) + DM Sans (body). 2026-06-30
-   ========================================================================== */
-
+/* The Hashrate Filter: page styles, in the grammar of the BTC Wedge Dashboard family
+   (Geist display, Inter body, JetBrains Mono for readings, labels and controls;
+   orange means the filter and nothing else; one tint, the chart frame). */
 :root{
-  --bg:#fff; --ink:#0B0B0D; --dim:#5C616B; --faint:#9DA1A8; --rule:#ECEDEF; --rule2:#F3F4F6;
-  --btc:#F26B16; --btc-dark:#C2622A; --green:#2C7A5B; --red:#C24A3A; --amber:#B0832E;
-  --bandlo:rgb(44,108,160,.10); --bandhi:rgb(194,98,42,.10);
-  --disp:'Geist','Inter',sans-serif; --body:'Inter',sans-serif; --mono:'JetBrains Mono',monospace;
-  /* soft-tint pills */
-  --p-lo-bg:#E7F2EC; --p-lo-tx:#2C7A5B;     /* deep value / calm / favourable */
-  --p-n-bg:#F0F1F4;  --p-n-tx:#697079;      /* normal */
-  --p-amb-bg:#FBF1DC; --p-amb-tx:#9A7218;   /* notable */
-  --p-hi-bg:#FBE7E2; --p-hi-tx:#BC4A38;     /* hot / stretched */
-  --p-btc-bg:#FCEADF; --p-btc-tx:#C2622A;   /* forward / accent */
+  --ink:#0B0B0D; --text:#25272D; --dim:#5C616B; --faint:#80858F; --rule:#ECEDEF; --alt:#F7F7F8;
+  --f:#F26B16; --f-dark:#C2622A; --two:#2C7A5B;
+  --disp:'Geist','Inter',system-ui,sans-serif; --body:'Inter',system-ui,sans-serif; --mono:'JetBrains Mono',ui-monospace,monospace;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:#1c1d22;font-family:var(--body);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
-.num{font-variant-numeric:tabular-nums}
-.wrap{max-width:1080px;margin:0 auto;padding:58px 36px 110px}
-/* prose flows to the container width (owner call Jul 4: a 72ch cap next to full-width
-   charts read as misalignment; if line length ever needs taming, narrow .wrap instead) */
+html{scroll-behavior:smooth}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+body{background:#fff;color:var(--text);font-family:var(--body);font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+a{color:var(--f-dark);text-decoration:none;border-bottom:1px solid rgb(194,98,42,.35)}
+a:hover{border-bottom-color:var(--f-dark)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 32px}
+.hidden{display:none}
 
-.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
-.skip-link:focus{position:fixed;top:8px;left:8px;width:auto;height:auto;margin:0;clip-path:none;white-space:normal;z-index:100;background:var(--btc);color:#fff;padding:8px 14px;border-radius:6px;font-weight:600}
+/* top bar */
+.top{position:sticky;top:0;z-index:10;background:rgba(255,255,255,.94);backdrop-filter:blur(6px);border-bottom:1px solid var(--rule)}
+.topin{display:flex;align-items:center;justify-content:space-between;height:54px}
+.brand{font-family:var(--disp);font-weight:700;font-size:17px;color:var(--ink);border:0}
+.brand::before{content:"";display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--f);margin-right:9px;vertical-align:1px}
+.top nav a{font-family:var(--mono);font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--dim);border:0;margin-left:22px;font-weight:500}
+.top nav a:hover{color:var(--ink)}
 
-/* anchor jumps must clear the sticky nav (single row at every width now) */
-.panel{scroll-margin-top:70px}
+/* byline, as in the wedge dashboard */
+.byline{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:10px;letter-spacing:.02em}
+.byline a{color:var(--ink);border-bottom:1px solid var(--rule)}
+.byline a:hover{border-bottom-color:var(--ink)}
+.byline .ext{color:var(--faint)}
+@media (max-width:640px){.byline .ext{display:none}}
+/* hero, as in the wedge dashboard: title, byline, freshness, tagline, lede, readings */
+.hero{padding:48px 0 40px}
+h1{font-family:var(--disp);font-weight:700;font-size:40px;line-height:1.15;letter-spacing:-.03em;color:var(--ink)}
+h1 .ac{color:var(--f)}
+.freshness{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:6px}
+.freshness span{color:var(--dim)}
+.tagline{font-family:var(--disp);font-weight:600;font-size:22px;line-height:1.35;color:var(--ink);max-width:860px;margin-top:22px}
+.hero .lede{color:var(--dim);margin-top:12px}
+.tiles{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:28px;scroll-margin-top:70px}
+.tiles.two{grid-template-columns:1fr 1fr;max-width:760px}
+.tile{border:1px solid var(--rule);border-radius:10px;padding:16px 18px}
+.tile .k{font-family:var(--mono);font-size:11px;color:var(--dim);font-weight:500;text-transform:uppercase;letter-spacing:.08em}
+.tile .v{font-family:var(--mono);font-weight:600;font-size:28px;color:var(--ink);line-height:1.2;margin-top:6px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tile.main .v{color:var(--f)}
+.tile .u{font-size:14px;color:var(--faint);font-weight:500}
+.tile .s{font-size:14px;color:var(--dim);margin-top:4px}
 
-@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+/* sections: a 2 px ink rule marks each chapter */
+.sec{padding:30px 0 60px;scroll-margin-top:56px}
+.sec>.wrap::before{content:"";display:block;height:2px;background:var(--ink);margin-bottom:34px}
+h2{font-family:var(--disp);font-weight:700;font-size:26px;line-height:1.25;color:var(--ink);letter-spacing:-.01em}
+h2.gap{margin-top:64px}
+h3{font-family:var(--disp);font-weight:600;font-size:20px;line-height:1.3;color:var(--ink);margin-top:56px}
+.eyebrow{font-family:var(--mono);font-size:11px;font-weight:500;color:var(--dim);text-transform:uppercase;letter-spacing:.12em;margin-bottom:10px}
+.lede{max-width:840px;margin-top:12px;color:var(--text)}
+.note{font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--dim);margin-top:10px;max-width:840px}
+.fig{border:1px solid var(--rule);border-radius:10px;background:#FAFAFB;padding:12px 14px 8px;margin-top:18px}
+.chart{width:100%}
+.chart.tall{height:600px}.chart.mid{height:400px}.chart.short{height:330px}
 
-/* ---- masthead ---- */
-h1{font-family:var(--disp);font-weight:700;font-size:40px;line-height:1.06;letter-spacing:-.03em;color:var(--ink);margin-bottom:10px}
-.byline{font-family:var(--disp);font-size:13px;color:var(--dim);margin-bottom:30px;font-weight:500}
-.byline a{color:var(--btc-dark);text-decoration:none;font-weight:600;border-bottom:1px solid rgb(194,98,42,.35)}
-.byline a:hover{border-bottom-color:var(--btc-dark)}
-.byline .ext{font-size:.8em;margin-left:1px;border:none;opacity:.65;font-weight:400}
-.tagline{font-family:var(--disp);font-weight:500;font-size:19px;line-height:1.4;color:var(--ink);letter-spacing:-.01em;margin-bottom:18px}
-.lede{color:var(--dim);font-size:15px;line-height:1.65;margin-bottom:22px}
-.chapterlist{margin:0 0 24px}
-.chap{font-size:15px;line-height:1.6;color:var(--dim);margin:0 0 9px}
-.chap b{font-family:var(--disp);color:var(--ink);font-weight:600}
-.meta{font-family:var(--disp);font-size:11px;color:var(--faint);letter-spacing:.02em;margin-bottom:8px}
-.meta b{color:var(--ink);font-weight:600}
-.freshness{font-family:var(--disp);font-size:12px;letter-spacing:.02em;color:var(--dim);margin:-20px 0 26px;font-weight:500}
-.freshness #data-as-of{color:var(--ink);font-weight:600;font-variant-numeric:tabular-nums}
+/* controls */
+.ctl{display:flex;flex-wrap:wrap;gap:14px;margin-top:20px}
+.grp{display:inline-flex;flex-wrap:wrap;border:1px solid var(--rule);border-radius:6px;overflow:hidden}
+.grp button{font:500 12px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--dim);background:#fff;border:0;border-right:1px solid var(--rule);padding:8px 13px;cursor:pointer;transition:all .14s}
+.grp button:last-child{border-right:0}
+.grp button:hover{background:var(--alt);color:var(--ink)}
+.grp button.on{background:var(--ink);color:#fff}
 
-/* ---- sticky chapter nav ---- */
-.secnav{position:sticky;top:0;z-index:50;display:flex;flex-wrap:wrap;gap:6px;
-  background:rgb(255,255,255,.92);backdrop-filter:blur(8px);
-  border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);margin:24px 0 0;padding:12px 0}
-.secnav a{font-family:var(--disp);font-size:11px;font-weight:500;letter-spacing:.05em;
-  text-transform:uppercase;color:var(--dim);text-decoration:none;white-space:nowrap;padding:5px 11px;border-radius:6px;transition:all .14s}
-.secnav a:hover{color:var(--ink);background:var(--rule2)}
-.secnav a.active{color:#fff;background:var(--ink)}
+/* comparison table */
+.cmpwrap{overflow-x:auto;margin-top:16px}
+table.cmp{border-collapse:collapse;width:100%;min-width:620px;font-size:15px}
+table.cmp th{text-align:left;font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);padding:8px 10px;border-bottom:1px solid var(--ink);vertical-align:bottom}
+table.cmp td{padding:10px;border-bottom:1px solid var(--rule);font-variant-numeric:tabular-nums}
+table.cmp td:nth-child(2){font-family:var(--mono)}
+table.cmp tr.f td{color:var(--ink);font-weight:600}
+table.cmp tr.f td:first-child{color:var(--f-dark)}
 
-/* ---- index card ---- */
-.indexcard{border:1px solid var(--rule);border-radius:10px;padding:22px 24px;margin:30px 0 8px}
-.indexcard .eyebrow{margin-bottom:14px}
-.ixlegend{font-family:var(--disp);font-size:11px;color:var(--faint);margin:2px 0 18px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.ixlegend .dot{display:none}
-.indexgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px 44px}
+/* big numbers */
+.nums{display:flex;gap:48px;margin-top:18px;flex-wrap:wrap}
+.nums div{display:flex;flex-direction:column}
+.nums .v{font-family:var(--mono);font-weight:600;font-size:44px;line-height:1.1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.nums .v.grey{color:var(--faint)}.nums .v.ac{color:var(--f)}.nums .v.tw{color:var(--two)}
+.nums .k{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:var(--dim);margin-top:4px}
 
-@media(width <=820px){.indexgrid{grid-template-columns:1fr}}
-.indexgroup{break-inside:avoid;margin-bottom:14px}
-.indexgroup .igh{font-family:var(--disp);font-size:11px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);border-bottom:1.5px solid var(--ink);padding-bottom:6px;margin-bottom:2px}
-.indexgroup .igh::first-letter{color:var(--btc)}
-.indexgroup a{position:relative;display:block;font-family:var(--disp);font-size:13px;font-weight:500;color:var(--ink);text-decoration:none;padding:7px 2px;line-height:1.3;border-bottom:1px solid var(--rule)}
-.indexgroup a:hover{background:#FAFBFC}
-.indexgroup a .ixrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.indexgroup a .ixname{font-family:var(--disp);font-weight:500;color:var(--ink)}
-.indexgroup a .ixval{display:inline-flex;align-items:center;gap:0;flex-shrink:0;white-space:nowrap}
-.indexgroup a .ixval .dot{display:none}
-/* pill discipline: normal readings are plain text; a pill appears only when the band dot
-   says the reading is notable or extreme (colour = attention, not decoration) */
-.indexgroup a .ixval b{font-family:var(--disp);font-weight:500;font-size:11px;letter-spacing:.03em;text-transform:uppercase;line-height:1;
-  padding:3px 0;background:none;color:var(--dim)}
-.indexgroup a .ixval:has(.dot.lo) b{background:var(--p-lo-bg);color:var(--p-lo-tx);padding:3px 8px;border-radius:4px}
-.indexgroup a .ixval:has(.dot.hi) b{background:var(--p-hi-bg);color:var(--p-hi-tx);padding:3px 8px;border-radius:4px}
-.indexgroup a .ixval:has(.dot.amb) b{background:var(--p-amb-bg);color:var(--p-amb-tx);padding:3px 8px;border-radius:4px}
-.indexgroup a .ixdesc{display:none}
-.indexgroup a:hover .ixdesc{display:block;position:absolute;left:0;top:calc(100% - 1px);z-index:40;font-family:var(--body);font-weight:400;font-size:13px;color:#fff;background:var(--ink);padding:8px 11px;border-radius:6px;max-width:300px;line-height:1.4;box-shadow:0 6px 20px rgb(0 0 0 / .18)}
-.indexgroup a.ixsub{padding:4px 0 4px 16px;border-bottom:none}
-.indexgroup a.ixsub .ixname{font-weight:400;font-size:11px;color:var(--faint)}
-.indexgroup a.ixsub::before{content:"";position:absolute;left:4px;top:11px;width:7px;height:1px;background:var(--rule)}
-.indexgroup a.ixsub:hover .ixname{color:var(--btc-dark)}
+/* data */
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:8px}
+.dl{list-style:none;margin-top:16px}
+.dl li{padding:9px 0;border-bottom:1px solid var(--rule);font-size:15px}
+.dl a{font-family:var(--mono);font-size:14px}
+.dl span{color:var(--dim);margin-left:10px}
+.cite{background:#fff;border:1px solid var(--rule);border-radius:10px;padding:16px 18px;margin-top:14px;font-size:15px}
+.cite pre{font-family:var(--mono);font-size:12.5px;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text)}
+.copy{display:inline-block;margin-top:10px;font:500 11px var(--mono);letter-spacing:.04em;text-transform:uppercase;background:#fff;border:1px solid var(--rule);border-radius:6px;padding:5px 11px;cursor:pointer;color:var(--dim)}
+.copy:hover{background:var(--alt);color:var(--ink)}
 
-/* ---- section heads ---- */
-.secthead{font-family:var(--disp);font-weight:700;font-size:13px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink);margin:78px 0 0;padding-top:0;border-top:none;display:flex;align-items:baseline;gap:12px;scroll-margin-top:70px}
-.secthead .desc{font-family:var(--mono);font-weight:400;letter-spacing:.01em;font-size:12px;color:var(--dim);display:block;margin-top:7px}
-.secthead::after{content:none}
-.secthead.first{margin-top:40px}
+/* disclosures, in the family's chip grammar */
+details{margin-top:16px}
+details summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:7px;font:600 11px var(--mono);letter-spacing:.04em;text-transform:uppercase;color:var(--dim);padding:6px 12px;border:1px solid var(--rule);border-radius:6px;user-select:none;transition:all .14s}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"\203A";font-size:13px;transition:transform .15s}
+details[open] summary::after{transform:rotate(90deg)}
+details summary:hover{color:var(--ink);background:var(--alt)}
+details[open] summary{color:var(--ink);border-color:var(--ink)}
+details p{margin-top:12px;font-size:15px;color:var(--dim);max-width:860px}
+details.how{margin-top:64px}
 
-/* ---- panels ---- */
-.panel{padding-top:44px;margin-top:0;border-bottom:1px solid var(--rule);padding-bottom:8px}
-.panel:first-of-type{padding-top:30px}
-section.panel:last-of-type{border-bottom:none}
-.eyebrow{font-family:var(--disp);font-size:11px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:14px;display:flex;align-items:center;gap:10px}
-.eyebrow b{color:var(--ink);font-weight:600}
-/* hierarchy: the question is a label, the answer is the reading (h2 under .answer) */
-h2{font-family:var(--disp);font-weight:600;font-size:18px;line-height:1.3;letter-spacing:-.01em;color:var(--ink);margin-bottom:10px}
-h3{font-family:var(--disp);font-weight:600;font-size:17px;line-height:1.25;color:var(--ink);margin-bottom:10px}
+footer{padding:28px 0 60px;font-size:14px;color:var(--dim);border-top:1px solid var(--rule)}
+footer .fine{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:6px}
 
-/* the loud answer */
-.answer,.section .answer{font-family:var(--disp);font-size:21px;font-weight:600;line-height:1.4;color:var(--ink);margin-bottom:10px;display:flex;align-items:baseline;gap:10px;flex-wrap:wrap}
-.answer .dot,.section .answer .dot{align-self:center}
-.chartdesc{font-size:15px;line-height:1.6;color:var(--dim);margin:0 0 18px}
-.section .why,.why{color:var(--dim);font-size:15px;line-height:1.62;margin-bottom:16px}
-.why b{color:var(--ink);font-weight:600}
-
-/* claimnum -> quiet mono-ish data line */
-.claimnum{font-family:var(--disp);font-weight:500;font-size:13px;color:var(--dim);letter-spacing:0;margin:2px 0 14px}
-.claimnum em{font-style:normal;color:var(--btc-dark);font-weight:600}
-.panel .claimnum{font-size:13px;color:var(--faint)}
-
-/* dots (kept for accessibility / answer markers) */
-.dot{display:inline-block;width:9px;height:9px;border-radius:50%;flex-shrink:0}
-.dot.lo{background:var(--green)}.dot.hi{background:var(--red)}.dot.n{background:var(--faint)}.dot.amb{background:var(--amber)}
-.section .answer .dot{width:11px;height:11px}
-
-/* tier badge -> soft pill */
-.tier{display:inline-block;font-family:var(--disp);font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;padding:3px 0;vertical-align:middle}
-.eragate{font-family:var(--mono);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);background:none;padding:0}
-
-/* hero readout: same data-strip grammar as every panel's claimnum (giant-numeral
-   treatment dropped Jul 4, owner call: the hero was the only panel doing it) */
-.bignums{display:flex;gap:36px;flex-wrap:wrap;align-items:baseline;border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:10px 0;margin:12px 0 18px}
-.bignums .bn{display:flex;align-items:baseline;gap:8px}
-.bignums .bn .k{font-family:var(--disp);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint)}
-.bignums .bn .v{font-family:var(--disp);font-weight:600;font-size:17px;font-variant-numeric:tabular-nums;letter-spacing:-.01em;color:var(--ink)}
-.bignums .bn .v.shadow{color:var(--dim)}.bignums .bn .v.actual{color:var(--btc)}
-.bignums .bn .sub{font-family:var(--disp);font-size:11px;color:var(--faint)}
-
-/* methodology disclosure */
-details.method{margin:12px 0 4px}
-/* disclosure summary borrows the toggle-chip control grammar so it clearly reads as clickable */
-details.method>summary{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:7px;user-select:none;padding:6px 12px;border:1px solid var(--rule);border-radius:6px;transition:all .14s}
-details.method>summary::-webkit-details-marker{display:none}
-details.method>summary::after{content:"\203A";font-size:13px;transition:transform .15s}
-details.method[open]>summary::after{transform:rotate(90deg)}
-details.method>summary:hover{color:var(--ink);background:var(--rule2)}
-details.method[open]>summary{color:var(--ink);border-color:var(--ink)}
-details.method .why,details.method .why.prose{font-size:13px;color:var(--dim);margin:11px 0 4px;line-height:1.6}
-details.method .mstat{font-family:var(--disp);font-size:13px;color:var(--dim);margin:8px 0 0}
-details.method .mstat b{color:var(--ink);font-weight:600}
-.glossary{margin:2px 0 18px}
-.glossary p{font-size:13px;line-height:1.6;color:var(--dim);margin:9px 0 0}
-.glossary p b{color:var(--ink)}
-
-/* toggle */
-.tgl{display:flex;align-items:center;gap:0;margin:2px 0 16px;flex-wrap:wrap}
-.tgl button{font-family:var(--disp);font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--dim);background:none;border:1px solid var(--rule);padding:6px 13px;cursor:pointer;transition:all .14s}
-.tgl button:first-child{border-radius:6px 0 0 6px}.tgl button:last-child{border-radius:0 6px 6px 0}
-.tgl button+button{border-left:none}
-.tgl button:hover{background:var(--rule2);color:var(--ink)}
-.tgl button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
-.tgl button.off{color:var(--faint)}
-.tgllabel{font-family:var(--disp);font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);margin-right:10px;align-self:center}
-.tglhint{flex-basis:100%;font-size:13px;line-height:1.45;color:var(--dim);margin:6px 0 0}
-.flagc{margin-left:10px;font-family:var(--disp);font-size:12px;letter-spacing:.01em;color:var(--dim);background:none;padding:0}
-
-/* chart */
-figure{margin:0 0 24px}
-.cap{font-family:var(--disp);font-size:12px;font-weight:500;letter-spacing:.01em;color:var(--faint);margin-bottom:10px}
-.chart{width:100%;scroll-margin-top:74px}
-.chartnote{font-family:var(--disp);font-size:13px;color:var(--dim);margin-top:8px}
-.chartsrc{font-family:var(--disp);font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);margin-top:10px}
-.schematic{color:var(--btc-dark)}
-
-/* ladder */
-.ladder{margin:0 0 18px;max-width:540px}
-.lad{display:flex;border:1px solid var(--rule);border-radius:8px;overflow:hidden}
-.seg{flex:1;text-align:center;padding:11px 4px;font-family:var(--disp);font-size:11px;font-weight:500;letter-spacing:.05em;color:var(--faint);border-right:1px solid var(--rule)}
-.seg:last-child{border-right:none}
-.seg.on{background:var(--p-lo-bg);color:var(--p-lo-tx);font-weight:600}
-.seg.on.hi{background:var(--p-hi-bg);color:var(--p-hi-tx)}
-.seg.on.amb{background:var(--p-amb-bg);color:var(--p-amb-tx)}
-.ladlbl{display:flex;justify-content:space-between;font-family:var(--disp);font-size:11px;color:var(--faint);margin-top:7px}
-.cur{font-family:var(--disp);font-size:11px;color:var(--dim);margin-top:8px}.cur b{font-weight:600;color:var(--ink)}
-
-/* supporting prose blocks -> quiet; .before shares the lawline panel-footer grammar
-   (the left-rule callout read as editorial, off the instrument language) */
-.before{font-size:13px;line-height:1.7;color:var(--dim);border-top:1px solid var(--rule);padding-top:13px;margin:8px 0 16px}
-.before .h{font-family:var(--disp);font-weight:600;color:var(--ink)}.before b{color:var(--ink);font-weight:600}
-.valid{font-size:13px;line-height:1.6;color:var(--green);font-weight:500;margin-bottom:14px}
-.lawline{font-size:13px;line-height:1.65;color:var(--dim);padding-left:14px;margin:8px 0 14px}
-/* footer */
-footer{margin-top:72px;padding-top:24px;border-top:1px solid var(--rule);font-size:13px;line-height:1.7;color:var(--faint);max-width:none}
-footer p{margin:0 0 8px}
-footer a{color:var(--btc-dark);text-decoration:none;font-weight:600}
-footer a:hover{text-decoration:underline}
-footer .fby{font-family:var(--disp);color:var(--dim);font-size:13px;margin-top:14px}
-footer .fts{font-family:var(--disp);font-size:11px}
-footer .fbuild{font-size:11px;color:var(--faint);margin-top:10px}
-
-/* responsive */
-@media(width <=1024px){.wrap{padding:34px 20px 70px}.bignums{gap:22px}h1{font-size:34px}.tagline{font-size:17px}}
-
-@media(width <=768px){.wrap{padding:22px 15px 44px}.bignums{flex-direction:column;gap:14px}h1{font-size:25px}h2{font-size:16px}.answer,.section .answer{font-size:18px}.secthead{font-size:13px}.secnav{gap:3px}.secnav a{font-size:11px;padding:4px 8px}}
-
-/* ── mockup text style: mono for data, labels, captions, pills ───────────── */
-.eyebrow,.meta,.byline,.secnav a,.cap,.chartnote,.claimnum,.tier,.eragate,.flagc,
-.bignums .bn .k,.bignums .bn .v,.bignums .bn .sub,
-.indexgroup a .ixval b,.ixlegend,.indexgroup .igh,.ladlbl,.cur,
-.seg,.tgl button,.tgllabel{font-family:var(--mono)}
-
-/* above-chart text = question + answer + data only; explainer lives in Methodology */
-
-/* hero big-numbers keep their window sub-label: a reading without its window is half a reading */
-/* clear separator: the data line is a bounded strip, hairline top + bottom (like the mockup) */
-.claimnum,.panel .claimnum{border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:9px 0;margin:12px 0 18px}
-
-/* ---- mockup panel shape (fresh skin): top row + classifier badge, short note ---- */
-.ptop{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
-.ptop .eyebrow{margin:0}
-.tier{font-family:var(--mono);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:3px 0;border:none;white-space:nowrap;flex:none}
-.tier.desc{color:var(--dim)}
-.tier.class{color:#4E7A6F}
-.tier.fwd{color:#B0832E}
-.pnote{font-size:15px;line-height:1.55;color:var(--dim);margin:6px 0 16px}
-.pnote.fine{font-size:13px;line-height:1.5;opacity:.82;margin:-8px 0 16px}
-
-/* ---- clearer structure: section-break rules + readable chart labels ---- */
-.secthead{border-top:1px solid var(--rule);padding-top:30px;margin:60px 0 0}
-.secthead.first{border-top:none;padding-top:0;margin-top:40px}
-.cap{color:var(--dim)}                 /* chart labels read as labels, not whispers */
-figure .cap{border-left:2px solid var(--rule);padding-left:9px}  /* tick the chart label */
-
-/* M4: drop the leading read-dot on answers (state lives in the badge + orange value) */
-.answer .dot{display:none}
-.answer .dot.lo,.answer .dot.hi,.answer .dot.amb{display:none}
-
-/* ============ DESIGN STRUCTURAL PASS — containing geometry (de-noised Jul 4: the figure
-   frame and the index card are the ONLY boxed containers; one border grey, one tint) ============ */
-/* 1. THE big lever: frame every chart as a recessed instrument panel; caption is its header */
-.panel figure{border:1px solid var(--rule);border-radius:10px;padding:15px 17px 13px;background:#FAFAFB;margin:0 0 26px}
-/* consecutive figures group into one multi-pane instrument: tight gap, caps do the labelling */
-.panel figure:has(+ figure){margin-bottom:10px}
-.panel figure .cap{border-bottom:1px solid var(--rule);border-left:none;padding:0 0 9px;margin:0 0 13px;color:var(--dim)}
-.panel figure .chart{background:transparent}
-.panel figure .chartnote{margin-top:11px}
-.panel figure p.chartdesc{margin:0 0 12px}
-
-/* 2. data readout: bare hairline strip (box removed in the Jul 4 de-noise pass; rule above wins) */
-
-/* 3. sections out-rank panels: a black chapter rule + more air; grey hairline stays for panels */
-.secthead{border-top:2px solid var(--ink);padding-top:34px;margin:90px 0 0}
-.secthead.first{border-top:none;padding-top:0;margin-top:40px}
-
-/* 4. panel toggles: borderless control row (docked-bar box removed in the Jul 4 de-noise pass) */
-.tgl{background:none;border:none;padding:0;margin:2px 0 16px;display:flex;align-items:center;flex-wrap:wrap;gap:6px}
-/* merged control rows (window + benchmark in one .tgl): each set sits in its own role=group span */
-.tgl span[role="group"]{display:inline-flex}
-.tgl span[role="group"] button:first-child{border-radius:6px 0 0 6px}
-.tgl span[role="group"] button:last-child{border-radius:0 6px 6px 0}
-.tgl span[role="group"]+.tgllabel{margin-left:16px}
-
-/* wrapped toggle rows on phones: each button carries its own border + radius */
-@media(width <= 480px){
-  .tgl{gap:4px}
-  .tgl button,.tgl button:first-child,.tgl button:last-child{border-radius:6px}
-  .tgl button+button{border-left:1px solid var(--rule)}
-  .tgl button.on{border-color:var(--ink)}
+@media (max-width:820px){
+  .tiles{grid-template-columns:1fr}
+  .cols{grid-template-columns:1fr}
 }
-
-/* 5. closing cross-reference reads as a panel footer */
-.lawline{border-top:1px solid var(--rule);padding-top:13px;margin-top:18px}
-
-/* 6. index scoreboard: same border grey as everything else (one-grey rule) */
-
-/* section descriptor on its own line under the chapter title (not inline) */
-.secthead{flex-wrap:wrap}
-.secthead .desc{flex-basis:100%;margin:6px 0 0}
-
-
-/* phone nav: numbers only, one row; anchor offset shrinks to match */
-@media(width <= 480px){
-  .secnav .nvl{display:none}
+@media (max-width:640px){
+  body{font-size:16px}
+  .wrap{padding:0 18px}
+  .hero{padding:30px 0 28px}
+  h1{font-size:30px}
+  .tagline{font-size:19px}
+  .tiles{margin-top:22px;gap:12px}
+  .tile{padding:14px 16px}
+  .tile .v{font-size:26px}
+  h2{font-size:22px} h3{font-size:18px;margin-top:40px}
+  .nums{gap:28px}.nums .v{font-size:34px}
+  .sec{padding:24px 0 44px}
+  .fig{padding:8px 6px 4px;border-radius:8px}
+  .chart.tall{height:560px}.chart.mid{height:380px}.chart.short{height:330px}
+  .grp button{padding:8px 10px}
+  .top nav a{margin-left:14px;font-size:11px}
 }
-
-/* chart watermark moved INTO the Plotly layouts (paper annotation in the JS) so it
-   survives the download-as-PNG button; a CSS overlay here only existed on the page */
-
-/* ==========================================================================
-   Bitcoin Hashrate Dashboard additions (adapted from the Bitcoin Market
-   Structure Dashboard stylesheet above, same design language)
-   ========================================================================== */
-h1 .ac{color:var(--btc)}
-/* the two-sided revision note: the page's one honesty callout, in the accent */
-.revnote{border-left:2px solid var(--btc);background:#FFF8F3;border-radius:0 8px 8px 0;padding:12px 16px}
-.revnote b{color:var(--ink)}
-/* download link emphasis inside prose */
-.pnote a{color:var(--btc-dark);text-decoration:none;font-weight:600;border-bottom:1px solid rgb(194,98,42,.35)}
-.pnote a:hover{border-bottom-color:var(--btc-dark)}
-.why a{color:var(--btc-dark);text-decoration:none;font-weight:600;border-bottom:1px solid rgb(194,98,42,.35)}
-.why a:hover{border-bottom-color:var(--btc-dark)}

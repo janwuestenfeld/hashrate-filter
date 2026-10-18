@@ -1,53 +1,65 @@
 """Render the dashboard page from the stored daily series.
 
-Computes the live readings (in the paper's own conventions, documented
-below), embeds the series as JSON, and writes index.html in the design
-language of Jan's Bitcoin Market Structure Dashboard (Plotly 2.32,
-Geist/Inter/JetBrains Mono, one muted palette, instrument grammar:
-eyebrow, question, answer, claim-number, prose, figure, note).
+Live part: the latest filtered hashrate and raw estimate, and one zoomable
+chart of the raw estimate, our filter, the two-sided version and the
+moving averages. Evidence part (fixed): the typical daily change year by
+year, the 2021 mining ban, and how our filter works. Then the download.
 
-Live readings and their conventions (paper, Section 4; README):
-
-  * luck removed      100 x (var(w(g_raw)) - var(w(g_filter))) /
-                      mean(1/n_t + 1/n_{t-1}), with w() winsorizing daily
-                      growth at 0.5 percent per tail, identically across
-                      series; over the full sample and from 2016;
-  * forecast scores   mean Poisson log-likelihood of the next day's block
-                      count under each construction's implied rate,
-                      lambda(t+1) = H_cand(t) x 86400 / (D(t+1) x 2^32),
-                      from 2016; plus the mean absolute count error;
-  * smear and lag     around the largest absolute raw daily move of the
-                      last 45 complete days: how much of it the filter and
-                      the three-day moving average record on the day and
-                      on the two following days;
-  * two-sided gap     RMS and tail maxima of two-sided minus one-sided
-                      over the days the two-sided estimate exists (it runs
-                      a week behind; the trailing days are empty), and how
-                      much the latest update revised the tail.
-
-Numbers quoted as the paper's (95.6 percent, 93.6 percent, 11.8 against
-3.10 percent per day, 31/half/95 percent response, the forecast scores
--4.095/-4.167/-4.484) are literals from the publication; numbers without
-that label are computed from the live series at build time.
+Numbers labelled as the paper's are literals from numbers.tex (one place,
+PAPER below). Every other number is computed from the series at build time.
 """
 
 import json
 import shutil
 import string
+import urllib.request
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.stats import poisson
 
-from daily_step import poisson_loglik_next_day
+from daily_step import Q_JUMP
 
 PAPER_URL = "https://papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322"
 REPO_URL = "https://github.com/janwuestenfeld/hashrate-filter"
 JAN_URL = "https://janwuestenfeld.github.io/wuestenfeld.eu/"
 TEO_URL = "https://www.linkedin.com/in/teo-geldner-96802bb7/"
 
-EH = 1e18  # H/s per EH/s
+# citation (as in CITATION.cff)
+CITE_YEAR = 2025
+CITE_TITLE = "Bitcoin hashrate dynamics: filtering Poisson-luck and identifying responses to price and fees"
+CITE_TEXT = (f"Wüstenfeld, J. and Geldner, T. ({CITE_YEAR}). {CITE_TITLE}. "
+             f"SSRN Working Paper 5786322.")
+CITE_BIB = (
+    "@unpublished{wuestenfeld" + str(CITE_YEAR) + "hashrate,\n"
+    "  author = {W{\\\"u}stenfeld, Jan and Geldner, Teo},\n"
+    "  title  = {Bitcoin hashrate dynamics: filtering {P}oisson-luck and identifying responses to price and fees},\n"
+    f"  year   = {{{CITE_YEAR}}},\n"
+    "  note   = {SSRN Working Paper 5786322},\n"
+    f"  url    = {{{PAPER_URL}}}\n"
+    "}"
+)
+MARK = "Wüstenfeld & Geldner · SSRN 5786322"
 
+# the paper's numbers (numbers.tex)
+PAPER = {
+    "sd_raw": "11.8%",          # \sdrawh, daily growth of the raw estimate
+    "sd_filter": "3.1%",        # \sdvsixe (3.10%)
+    "noise_share": "96%",       # \noisesharefull, luck share of the variance of raw daily growth
+    "growth_unc": 3.7,          # \filtgrowthsd, sd of the filter's daily-growth error, %
+    "luck_full": "93.6%",       # \luckremvsixe, full sample
+    "luck_2016": "95.6%",       # \luckremvsixemature, from 2016
+    "gain_day": "31%",          # \gainquiet
+    "gain_week": "95%",         # \stepweek
+    "ban": "97%",               # \banvsixe
+    "ma_acf3": "−0.48",         # \maacfthree
+    "cov_quiet": "96%", "cov_jump1": "9%", "cov_jump2": "44%",   # \bandcov*
+    "luck_two": "99.1%",        # \luckremtwosided
+}
+TWO_LAG = 7
+
+EH = 1e18
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
@@ -61,124 +73,183 @@ def fmt_pct(x, dp=1, sign=True) -> str:
     return f"{s}{abs(x):.{dp}f}%"
 
 
-def _winsor(x):
-    lo, hi = np.nanquantile(x, [0.005, 0.995])
-    return np.clip(x, lo, hi)
+def fmt_eh(x) -> str:
+    return f"{x:,.0f}"
 
 
-def compute_stats(df: pd.DataFrame, meta: dict, tail_shift: float) -> dict:
-    d = df
+def neg(x, dp=2) -> str:
+    return f"{x:.{dp}f}".replace("-", "−")
+
+
+def expected_blocks(h, d):
+    """A rate h (H/s) against difficulty d expects h x 86400 / (d x 2^32) blocks a day."""
+    return h * 86400.0 / (d * 2.0 ** 32)
+
+
+# ------------------------------------------------------------------ stats
+def ordinary_gain(q_quiet: float, prior: float) -> float:
+    """Steady-state gain on a day whose arrival-time weight sits at the prior."""
+    q = (1.0 - prior) * q_quiet + prior * Q_JUMP
+    p = q
+    for _ in range(5000):
+        pt = p + q
+        k = pt / (pt + 1.0 / 144.0)
+        p = (1.0 - k) * pt
+    return k
+
+
+def acf(x: np.ndarray, k: int) -> float:
+    x = x[np.isfinite(x)]
+    a, b = x[:-k] - x[:-k].mean(), x[k:] - x[k:].mean()
+    return float((a * b).sum() / np.sqrt((a * a).sum() * (b * b).sum()))
+
+
+def hourly_counts(blocks, day):
+    """Blocks of the day, assigned to the day and to each hour by median time past."""
+    if blocks is None or len(blocks) == 0:
+        return None
+    b = blocks if isinstance(blocks, pd.DataFrame) else pd.DataFrame(blocks)
+    mt = pd.to_datetime(b["median_time"])
+    sel = mt.dt.normalize() == pd.Timestamp(day)
+    if not sel.any():
+        return None
+    hrs = ((mt[sel] - pd.Timestamp(day)) / pd.Timedelta(hours=1)).astype(float).clip(0, 23.999).astype(int)
+    return np.bincount(hrs.values, minlength=24).tolist()
+
+
+def compute_stats(df: pd.DataFrame, meta: dict) -> tuple:
+    d = df.copy()
+    d["ma7"] = d["raw"].rolling(7, min_periods=1).mean()
     n = len(d)
-    days = d["date"]
-    log_raw = np.log(d["raw"].values)
-    log_pure = np.log(d["pure"].values)
-    two_vals = d["pure_two_sided"].values.astype(float)
-    valid_two = ~np.isnan(two_vals)
-    log_two = np.full(n, np.nan)
-    log_two[valid_two] = np.log(two_vals[valid_two])
-    log_ma3 = np.log(d["ma3"].values)
-    n_blocks = d["n_blocks"].values.astype(float)
-
-    g_raw = 100.0 * np.diff(log_raw)
-    g_pure = 100.0 * np.diff(log_pure)
-    g_ma3 = 100.0 * np.diff(log_ma3)
-    gdays = days.values[1:]
-
     st = {}
-    st["as_of"] = days.iloc[-1]
-    st["two_last"] = days[valid_two].iloc[-1]
-    st["pure_eh"] = d["pure"].iloc[-1] / EH
-    st["raw_eh"] = d["raw"].iloc[-1] / EH
-    st["d1"] = g_pure[-1]
-    st["d7"] = 100.0 * (log_pure[-1] - log_pure[-8]) if n > 7 else np.nan
-    st["luck_last"] = 100.0 * (log_raw[-1] - log_pure[-1])
-    st["band_pct"] = 100.0 * 1.96 * np.sqrt(d["p_filt"].iloc[-1])
-    st["weight_last"] = float(d["weight"].iloc[-1])
-    st["n_last"] = int(d["n_blocks"].iloc[-1])
+    last = d.iloc[-1]
+    st["as_of"] = last["date"]
+    st["pure"] = last["pure"] / EH
+    b = 1.96 * np.sqrt(last["p_filt"])
+    st["band_lo"], st["band_hi"] = st["pure"] * np.exp(-b), st["pure"] * np.exp(b)
+    st["raw"] = last["raw"] / EH
+    st["n"] = int(last["n_blocks"])
+    lam = expected_blocks(last["pure"], last["difficulty"])
+    st["lam"] = lam
+    st["n_lo"], st["n_hi"] = int(poisson.ppf(0.025, lam)), int(poisson.ppf(0.975, lam))
+    st["h_lo"], st["h_hi"] = int(poisson.ppf(0.025, lam / 24)), int(poisson.ppf(0.975, lam / 24))
+    lp = np.log(d["pure"].values)
+    st["d1"] = 100 * (lp[-1] - lp[-2])
+    st["d7"] = 100 * (lp[-1] - lp[-8])
+    st["w_last"] = float(last["weight"])
+    st["w_typ"] = float(d["weight"].median())
+    st["w_n"] = int((d["weight"] > 0.7).sum())
 
-    # --- luck removed (the paper's convention; growth in log units, so the
-    # variance and the per-day Poisson variance 1/n_t + 1/n_{t-1} match) ---
-    ln_raw = np.diff(log_raw)
-    ln_pure = np.diff(log_pure)
+    g_all = np.log(d[["raw", "ma3", "ma7", "pure", "pure_two_sided"]]).diff()
+    st["sd"] = {c: 100 * float(g_all[c].std()) for c in ["raw", "ma3", "ma7", "pure", "pure_two_sided"]}
 
-    def luck_share(ln_f, mask, lo_date):
-        m = mask & (gdays >= np.datetime64(lo_date))
-        luck_var = (1.0 / n_blocks[1:] + 1.0 / n_blocks[:-1])[m]
-        return 100.0 * (np.var(_winsor(ln_raw[m])) - np.var(_winsor(ln_f[m]))) / np.mean(luck_var)
+    # correlation of daily growth at lags 1-10, from 2016
+    g = g_all[d["date"] >= pd.Timestamp("2016-01-01")]
+    st["acf"] = {c: [round(acf(g[c].values, k), 3) for k in range(1, 11)] for c in ["raw", "ma3", "ma7", "pure"]}
+    st["acf_raw1"] = st["acf"]["raw"][0]
+    st["acf_ma3_3"] = st["acf"]["ma3"][2]
+    st["acf_ma7_7"] = st["acf"]["ma7"][6]
+    st["acf_pure_max"] = max(st["acf"]["pure"], key=abs)
+    k = ordinary_gain(float(meta["q_quiet"]), float(meta["prior"]))
+    st["gain"] = k
+    st["past_share"] = k / 2.0   # share of the luck in a filter move that comes from earlier days
 
-    full = np.ones(n - 1, dtype=bool)
-    st["luck_pure_full"] = luck_share(ln_pure, full, "2011-01-01")
-    st["luck_pure_16"] = luck_share(ln_pure, full, "2016-01-01")
-    st["luck_two_full"] = luck_share(np.diff(log_two), valid_two[1:], "2011-01-01")
-    st["sd_raw_full"] = float(g_raw.std())
-    st["sd_pure_full"] = float(g_pure.std())
-    st["sd_raw_16"] = float(g_raw[gdays >= np.datetime64("2016-01-01")].std())
-    st["sd_pure_16"] = float(g_pure[gdays >= np.datetime64("2016-01-01")].std())
+    # one lucky day at the top of today's luck range, true rate unchanged
+    eps = float(np.log(168 / 144))
+    st["lk"] = {"raw": 100 * eps, "m3": 100 * np.log((2 + np.exp(eps)) / 3),
+                "m7": 100 * np.log((6 + np.exp(eps)) / 7), "f0": 100 * k * eps, "f1": -100 * k * k * eps}
 
-    # --- forecast scores, from 2016 (the paper's construction) ---
-    idx = np.flatnonzero(days.values >= np.datetime64("2016-01-01"))
-    idx = idx[idx < n - 1]
-    n_next = n_blocks[idx + 1]
-    D_next = d["difficulty"].values[idx + 1]
-    st["score_years"] = int(pd.Timestamp(days.values[idx[0]]).year), int(days.iloc[-1].year)
-    st["score_n"] = len(idx)
-    st["score_pure"] = poisson_loglik_next_day(d["pure"].values[idx], n_next, D_next)
-    st["score_ma3"] = poisson_loglik_next_day(d["ma3"].values[idx], n_next, D_next)
-    st["score_raw"] = poisson_loglik_next_day(d["raw"].values[idx], n_next, D_next)
-    lam = lambda col: d[col].values[idx] * 86400.0 / (D_next * 2.0**32)
-    st["mae_pure"] = float(np.abs(n_next - lam("pure")).mean())
-    st["mae_raw"] = float(np.abs(n_next - lam("raw")).mean())
+    # the dated event on the main chart: the largest raw move of the last 30 days
+    # whose exit from the three-day average three days later is visible
+    gr = 100 * g_all["raw"].values
+    g3 = 100 * g_all["ma3"].values
+    ev, best = -1, 0.0
+    for i in range(max(1, n - 30), n - 3):
+        if np.isfinite(gr[i]) and np.isfinite(g3[i + 3]) and gr[i] * g3[i + 3] < 0 \
+                and abs(g3[i + 3]) >= abs(gr[i]) / 6 and abs(gr[i]) > best:
+            ev, best = i, abs(gr[i])
+    st["ev"] = ev
+    if ev > 0:
+        st["ev_d"], st["ev_g"], st["ev_g3"] = d["date"].iloc[ev], gr[ev], g3[ev + 3]
 
-    # --- smear and lag around the latest large raw move ---
-    # the event day needs a follow-up week (the filter's convergence) and
-    # two following days (the moving average's echo), so it is picked from
-    # the last 45 complete days with room to spare
-    lo = max(1, n - 46)
-    hi = n - 7
-    e = lo + int(np.argmax(np.abs(g_raw[lo - 1: hi - 1])))
-    st["ev_i"] = e
-    st["ev_date"] = days.iloc[e]
-    st["ev_graw"] = g_raw[e - 1]
-    st["ev_gpure"] = g_pure[e - 1]
-    st["ev_gma3"] = [g_ma3[e - 1], g_ma3[e], g_ma3[e + 1]]
-    st["ev_win"] = [max(0, e - 6), min(n - 1, e + 6)]
-    # what the move turned out to be: the filtered level five days after
-    # against the day before the event, as a share of the raw move
-    ev_move = log_raw[e] - log_raw[e - 1]
-    st["ev_held5"] = 100.0 * (log_pure[e + 5] - log_pure[e - 1]) / ev_move
-    st["ev_next_raw"] = 100.0 * (log_raw[e + 1] - log_raw[e]) / ev_move
-    st["ev_kind"] = "luck" if st["ev_held5"] < 40.0 else "real"
-
-    # --- the two-sided gap (over the days the estimate exists) ---
-    gap = log_two[valid_two] - log_pure[valid_two]
-    st["two_rms_full"] = 100.0 * float(np.sqrt((gap ** 2).mean()))
-    st["two_rms_90"] = 100.0 * float(np.sqrt((gap[-90:] ** 2).mean()))
-    st["two_tail7"] = 100.0 * float(np.abs(gap[-7:]).max())
-    st["tail_shift"] = 100.0 * tail_shift
-
-    st["q_quiet"] = float(meta["q_quiet"])
-    st["prior"] = float(meta["prior"])
-    return st
+    # the 2021 ban
+    w = d[(d["date"] >= "2021-05-01") & (d["date"] <= "2021-07-31")].set_index("date")
+    st["ban_hi"], st["ban_hi_d"] = w["pure"].loc[:"2021-06-15"].max() / EH, w["pure"].loc[:"2021-06-15"].idxmax()
+    st["ban_lo"], st["ban_lo_d"] = w["pure"].loc["2021-06-15":].min() / EH, w["pure"].loc["2021-06-15":].idxmin()
+    st["ban_lo7_d"] = w["ma7"].loc["2021-06-15":].idxmin()
+    st["ban_lag7"] = int((st["ban_lo7_d"] - st["ban_lo_d"]).days)
+    half = (st["ban_hi"] + st["ban_lo"]) / 2 * EH
+    after = w.loc[st["ban_hi_d"]:]
+    st["ban_half_f"] = after.index[after["pure"] <= half][0]
+    st["ban_half_7"] = after.index[after["ma7"] <= half][0]
+    st["ban_half_lag"] = int((st["ban_half_7"] - st["ban_half_f"]).days)
+    gap = (after["ma7"] - after["pure"]).loc[:st["ban_lo_d"]]
+    st["ban_gap_d"] = gap.idxmax()
+    st["ban_gap_7"], st["ban_gap_f"] = after["ma7"].loc[st["ban_gap_d"]] / EH, after["pure"].loc[st["ban_gap_d"]] / EH
+    t9 = int(np.flatnonzero(d["date"].values == np.datetime64("2021-06-09"))[0])
+    w9 = float(d["weight"].iloc[t9])
+    q9 = (1.0 - w9) * float(meta["q_quiet"]) + w9 * Q_JUMP
+    st["ban_flag_k"] = 1.0 - float(d["p_filt"].iloc[t9]) / (float(d["p_filt"].iloc[t9 - 1]) + q9)
+    return st, d
 
 
-# ------------------------------------------------------------------ payload
-def build_payload(df: pd.DataFrame, st: dict) -> str:
-    d = df
-
-    def eh(col):
-        return [None if not np.isfinite(v) else round(v / EH, 4) for v in col]
-
-    payload = {
-        "as_of": str(st["as_of"].date()),
+def payload(d: pd.DataFrame, st: dict, hours) -> str:
+    def col(c):
+        return [None if not np.isfinite(v) else float(f"{float(v) / EH:.6g}") for v in d[c].values]
+    b = 1.96 * np.sqrt(d["p_filt"].values)
+    p = {
         "dates": d["date"].dt.strftime("%Y-%m-%d").tolist(),
-        "raw": eh(d["raw"].values),
-        "pure": eh(d["pure"].values),
-        "two": eh(d["pure_two_sided"].values.astype(float)),
-        "ma3": eh(d["ma3"].values),
-        "pf": [float(f"{v:.4e}") for v in d["p_filt"].values],
-        "ev": {"i": int(st["ev_i"]), "win": st["ev_win"]},
+        "raw": col("raw"), "pure": col("pure"), "ma3": col("ma3"), "ma7": col("ma7"), "two": col("pure_two_sided"),
+        "acf": st["acf"], "lag": TWO_LAG,
+        "hours": hours, "lam": round(st["lam"], 2), "hlo": st["h_lo"], "hhi": st["h_hi"],
+        "ev": int(st["ev"]), "gain": round(st["gain"], 4), "nhi": st["n_hi"],
+        "asof": str(st["as_of"].date()), "asof_txt": fmt_date(st["as_of"]),
+        "mark": MARK,
+        "ban": {"halfF": st["ban_half_f"].strftime("%-d %b"), "half7": st["ban_half_7"].strftime("%-d %b"),
+                "half": round((st["ban_hi"] + st["ban_lo"]) / 2, 1), "gapD": st["ban_gap_d"].strftime("%Y-%m-%d"), "gap7": round(st["ban_gap_7"], 1), "gapF": round(st["ban_gap_f"], 1)},
     }
-    return json.dumps(payload, separators=(",", ":"))
+    return json.dumps(p, separators=(",", ":"))
+
+
+# ------------------------------------------------------------------ share image
+def share_images(d: pd.DataFrame, st: dict, out: Path, site_url: str) -> bool:
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.dates as mdates
+        import matplotlib.pyplot as plt
+        from matplotlib import font_manager
+    except Exception:
+        return False
+    have = {f.name for f in font_manager.fontManager.ttflist}
+    fam = next((f for f in ("Geist", "Inter") if f in have), "DejaVu Sans")
+    w = d.iloc[-180:]
+    short_url = site_url.replace("https://", "").rstrip("/")
+    bw = 1.96 * np.sqrt(w["p_filt"].values)
+    with plt.rc_context({"font.family": fam}):
+        for name, size in [("share.png", (12, 6.75)), ("og-card.png", (12, 6.3))]:
+            fig = plt.figure(figsize=size, dpi=100)
+            fig.patch.set_facecolor("white")
+            fig.text(0.05, 0.93, "Bitcoin's daily hashrate moves are mostly luck.", fontsize=20,
+                     fontweight="bold", color="#0B0B0D", va="top")
+            fig.text(0.05, 0.86, "We built a filter that removes it, using the protocol's own rules.",
+                     fontsize=20, fontweight="bold", color="#F26B16", va="top")
+            ax = fig.add_axes([0.07, 0.15, 0.80, 0.55])
+            ax.scatter(w["date"], w["raw"] / EH, s=10, color="#AEB2BA", label="raw estimate", zorder=2)
+            ax.plot(w["date"], w["pure"] / EH, color="#F26B16", lw=3, label="our filter", zorder=3)
+            ax.annotate(f"{st['pure']:,.0f} EH/s\n{fmt_date(st['as_of'])}", xy=(w["date"].iloc[-1], st["pure"]),
+                        xytext=(10, 0), textcoords="offset points", va="center", fontsize=14,
+                        color="#C2622A", fontweight="bold", annotation_clip=False)
+            ax.set_ylabel("EH/s", fontsize=13)
+            ax.xaxis.set_major_formatter(mdates.DateFormatter("%b %Y"))
+            ax.tick_params(labelsize=12)
+            for s in ["top", "right"]:
+                ax.spines[s].set_visible(False)
+            ax.legend(frameon=False, fontsize=12, loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, borderaxespad=0.2)
+            fig.text(0.05, 0.035, f"{MARK}  ·  {short_url}", fontsize=12, color="#5C616B")
+            fig.savefig(out / name, dpi=100)
+            plt.close(fig)
+    return True
 
 
 # ------------------------------------------------------------------ html
@@ -187,404 +258,334 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bitcoin Hashrate Dashboard</title>
-<meta name="description" content="$DESCRIPTION">
-<link rel="canonical" href="${SITE_URL}">
+<title>Bitcoin Hashrate Filter: the daily hashrate without the block luck</title>
+<meta name="description" content="$DESC">
+<link rel="canonical" href="$SITE_URL">
 <meta property="og:type" content="website">
-<meta property="og:url" content="${SITE_URL}">
-<meta property="og:title" content="Bitcoin Hashrate Dashboard">
-<meta property="og:description" content="$DESCRIPTION">
+<meta property="og:url" content="$SITE_URL">
+<meta property="og:title" content="Bitcoin Hashrate Filter">
+<meta property="og:description" content="$DESC">
 <meta property="og:image" content="${SITE_URL}og-card.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Bitcoin Hashrate Dashboard">
-<meta name="twitter:description" content="$DESCRIPTION">
+<meta name="twitter:title" content="Bitcoin Hashrate Filter">
+<meta name="twitter:description" content="$DESC">
 <meta name="twitter:image" content="${SITE_URL}og-card.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.plot.ly/plotly-2.32.0.min.js" integrity="sha384-7TVmlZWH60iKX5Uk7lSvQhjtcgw2tkFjuwLcXoRSR4zXTyWFJRm9aPAguMh7CIra" crossorigin="anonymous" onerror="__plotlyFallback(0)"></script>
 <script>
 (function(){
-  var MIRRORS = [
-    "https://cdn.jsdelivr.net/npm/plotly.js@2.32.0/dist/plotly.min.js",
-    "https://unpkg.com/plotly.js@2.32.0/dist/plotly.min.js"
-  ];
-  window.__plotlyFallback = function(nextIdx){
+  var MIRRORS = ["https://cdn.jsdelivr.net/npm/plotly.js@2.32.0/dist/plotly.min.js","https://unpkg.com/plotly.js@2.32.0/dist/plotly.min.js"];
+  window.__plotlyFallback = function(i){
     if (typeof Plotly !== 'undefined') return;
-    if (nextIdx >= MIRRORS.length) { console.error('Plotly failed to load from all CDN mirrors.'); return; }
-    var s = document.createElement('script');
-    s.src = MIRRORS[nextIdx];
-    s.crossOrigin = 'anonymous';
-    s.onerror = function(){ __plotlyFallback(nextIdx + 1); };
+    if (i >= MIRRORS.length) return;
+    var s = document.createElement('script'); s.src = MIRRORS[i]; s.crossOrigin = 'anonymous';
+    s.onerror = function(){ __plotlyFallback(i + 1); }; s.onload = function(){ if (window.__draw) window.__draw(); };
     document.head.appendChild(s);
   };
 })();
 </script>
-<link rel="stylesheet" href="site/dashboard.css">
+<style>$CSS</style>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23F26B16'/%3E%3C/svg%3E">
 <script data-goatcounter="https://hashrate-filter.goatcounter.com/count" async src="//gc.zgo.at/count.js"></script>
 </head>
 <body>
-<main class="wrap">
-  <a class="sr-only skip-link" href="#sec-series">Skip to content</a>
 
-  <h1>Bitcoin Hashrate <span class="ac">Dashboard</span></h1>
-  <div class="byline">by <a href="$JAN_URL" target="_blank" rel="noopener">Dr. Jan Wüstenfeld<span class="ext"> (homepage&nbsp;↗)</span></a> and <a href="$TEO_URL" target="_blank" rel="noopener">Teo Geldner<span class="ext"> (LinkedIn&nbsp;↗)</span></a> · <a href="$PAPER_URL" target="_blank" rel="noopener">the paper<span class="ext"> (SSRN&nbsp;↗)</span></a> · <a href="$REPO_URL" target="_blank" rel="noopener">the code<span class="ext"> (GitHub&nbsp;↗)</span></a></div>
-  <div class="freshness">Updated daily from the public Bitcoin blockchain · data as of <span id="data-as-of">$AS_OF</span>, the last complete UTC day</div>
-  <div class="tagline">Bitcoin's hashrate, without the luck.</div>
-  <div class="lede prose">A day's raw hashrate estimate is mostly block-discovery luck: chance alone moves it by about 11.8% a day. This page shows the raw estimate against the filtered series of Wüstenfeld and Geldner (2025), which removes that luck using its known distribution — no window length, no bandwidth — updated daily, free to download.</div>
-
-  <div class="bignums">
-    <div class="bn"><span class="k">Filtered · $AS_OF</span><span class="v actual">$PURE_EH EH/s</span></div>
-    <div class="bn"><span class="k">Day</span><span class="v">$D1</span></div>
-    <div class="bn"><span class="k">Week</span><span class="v">$D7</span></div>
-    <div class="bn"><span class="k">Raw today</span><span class="v">$LUCK_LAST</span><span class="sub">$LUCK_SIDE the filter — mostly luck</span></div>
-  </div>
-
-  <nav class="secnav" aria-label="Sections">
-    <a href="#sec-series">The series</a>
-    <a href="#sec-luck">Luck &amp; the average</a>
-    <a href="#sec-twosided">Two-sided</a>
-    <a href="#sec-download">Download</a>
-  </nav>
-
-  <!-- =================== 1 · THE SERIES =================== -->
-  <div class="secthead first" id="sec-series">The series<span class="desc">the raw daily estimate against the filter, 2011 to today</span></div>
-
-  <section class="panel" id="ind1">
-    <div class="ptop"><div class="eyebrow">The main chart</div><span class="tier desc">daily · log scale</span></div>
-    <h2>What is the network hashrate right now?</h2>
-    <div class="answer"><span><b>$PURE_EH EH/s</b> on $AS_OF — $D1 on the day, $D7 on the week, on the filtered series.</span></div>
-    <div class="claimnum">the raw estimate read $RAW_EH EH/s on the same day — $LUCK_LAST_ABS $LUCK_SIDE the filter, mostly block luck · $N_LAST blocks found</div>
-    <p class="pnote">Bitcoin's hashrate has to be inferred from how many blocks the network finds, and block discovery is a lottery: given the difficulty, a day's block count is Poisson with mean 144, so luck alone moves a raw daily estimate by about 11.8% a day. The filter uses the known distribution of that luck. In the paper it removes 95.6% of the luck variance in daily growth from 2016 onward, and it records 31% of a lasting hashrate change on the day itself, half by the next day, 95% within a week.</p>
-    <div class="tgl" role="group" aria-label="Chart overlays">
-      <span class="tgllabel">Overlays</span>
-      <button id="btn-raw" class="on" type="button">Raw estimate</button>
-      <button id="btn-two" class="on" type="button">Two-sided</button>
-      <button id="btn-band" type="button">95% band</button>
-    </div>
-    <figure>
-      <div class="cap">Daily Bitcoin network hashrate, 2011 to today (log scale, EH/s)</div>
-      <div id="ch-main" class="chart" style="height:460px"></div>
-      <p class="chartnote">Drag the slider to zoom; hover for the day's values. The two-sided line runs a week behind: with fewer than seven following days there is no two-sided estimate yet.</p>
-      <p class="chartsrc">Source: Blockchair daily block dumps, as in the paper · only complete UTC days</p>
-    </figure>
-    <details class="method">
-      <summary>Methodology</summary>
-      <div class="why prose">
-        <p>Let y be the raw daily log hashrate estimate and h the log of the day's average hashrate. The model is a local-level state-space system: observation y = h + eps with Var(eps) = 1/144 fixed by the protocol (a day at the prevailing rate finds a Poisson number of blocks with mean 144); state h_t = h_{t-1} + eta_t with Var(eta_t) = q_t = (1 − pi_t) q_quiet + pi_t q_jump. Each day the filter moves its estimate toward the raw estimate by K_t = V_t / (V_t + 1/144) of the gap. The weight pi_t comes from the arrival times of the day's blocks: under a constant hashrate, arrivals are uniform over the day, so clustering is evidence of a real intraday shift (a centroid statistic and a 24-bin scan statistic, combined by Fisher's method, mapped into pi_t with a fixed prior).</p>
-        <p>Constants: R = 1/144 (protocol) · q_quiet = 7.81e-4 (the one fitted parameter; this page runs $Q_QUIET) · q_jump = 1.51e-2 (calibrated) · scan null 50,000 Monte Carlo draws, seed 123 · prior $PRIOR. The reference for the weights is stored once and reused, so a new day's weight is computed the same way every time.</p>
-        <p><b>What changes and what never changes.</b> Once a day is published here, its raw estimate, filtered value and moving-average value never change — the filter works from past and present data only and the past is never re-run. The two-sided line is the exception: it uses the following days by construction, so it runs a week behind and its last days are revised as new days arrive. Only complete UTC days are shown; days are assigned by median time (a day closes once the chain tip's median time passes midnight, which never decreases along the chain), and the arrival-time weight uses header times.</p>
-        <p><b>Sources.</b> The history (2011 to 2026-07-15) is the paper's series, built from Blockchair's daily block dumps. New days come from the same dumps; if a day's dump is not yet published when the page is built, the same three fields (header time, median time, difficulty) are read from mempool.space's live API, which also supplies the post-midnight blocks that close the latest day. The page is built daily at about 04:30 UTC; the full construction is in the <a href="$REPO_URL" target="_blank" rel="noopener">repository</a>.</p>
+<main>
+<section class="hero">
+  <div class="wrap">
+    <h1>Bitcoin Hashrate <span class="ac">Filter</span></h1>
+    <div class="byline">by <a href="$JAN_URL" target="_blank" rel="noopener">Dr. Jan Wüstenfeld<span class="ext"> (homepage&nbsp;↗)</span></a> and <a href="$TEO_URL" target="_blank" rel="noopener">Teo Geldner<span class="ext"> (LinkedIn&nbsp;↗)</span></a> · <a href="$PAPER_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-paper">Paper<span class="ext"> (SSRN&nbsp;↗)</span></a> · <a href="$REPO_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-code">Code<span class="ext"> (GitHub&nbsp;↗)</span></a></div>
+    <div class="freshness">Updated daily from public block data · last updated <span>$UPDATED</span></div>
+    <div class="tagline">Bitcoin's daily hashrate moves are mostly luck. We built a filter that removes it, using the protocol's own rules.</div>
+    <p class="lede">Every daily hashrate figure comes from the number of blocks found that day and the difficulty. Blocks arrive at random, as a Poisson process, so the raw estimate moves by about $SD_RAW from one day to the next even when the hashrate stays the same. Moving averages damp these swings, but when a lucky day leaves their window the average falls although the hashrate did not change. We are the first to remove the luck without a smoothing window, using the size of Poisson luck at each day's block count and the times at which the day's blocks arrive. Since 2016 our filter removes $LUCK_2016 of this luck.</p>
+    <div class="tiles two" id="live">
+      <div class="tile main">
+        <div class="k">Our filter, $AS_OF</div>
+        <div class="v">$PURE <span class="u">EH/s</span></div>
       </div>
-    </details>
-  </section>
+      <div class="tile">
+        <div class="k">Raw estimate, same day</div>
+        <div class="v">$RAW <span class="u">EH/s</span></div>
+        <div class="s">from $N blocks</div>
+      </div>
+    </div>
+  </div>
+</section>
 
-  <!-- =================== 2 · LUCK AND THE MOVING AVERAGE =================== -->
-  <div class="secthead" id="sec-luck">Luck and the moving average<span class="desc">what the filter removes, and what the three-day average does to a move</span></div>
+<section class="sec">
+  <div class="wrap">
+    <h2>Our filter follows the hashrate without the daily luck of the raw estimate</h2>
+    <p class="lede">Grey dots are the raw estimate, the orange line is our filter and the dotted line the 3-day average. The 7-day average is hidden, and you can show it by clicking it in the legend. Drag across the chart to zoom, and use the bar below it to move through the history since 2011.</p>
+    <figure class="fig"><div id="ch-main" class="chart tall"></div></figure>
+    <p class="note">The green line is the two-sided version of our filter. It also uses the following seven days, so its last seven days (shaded, dotted) are not final and change as new days come in. Use the orange line for real-time work and the green line to look back at history. All other lines never change once published.</p>
+  </div>
+</section>
 
-  <section class="panel" id="ind2">
-    <div class="ptop"><div class="eyebrow">Block luck</div><span class="tier desc">daily · live</span></div>
-    <h2>How much of the raw daily move is just luck?</h2>
-    <div class="answer"><span><b>$LUCK_16%</b> since 2016, live — in the paper, 95.6%.</span></div>
-    <div class="claimnum">raw $SD_RAW_16%/day against filter $SD_PURE_16%/day since 2016 · $SD_RAW_FULL% against $SD_PURE_FULL% over the full sample · the two-sided version removes $LUCK_TWO_FULL%</div>
-    <p class="pnote">The raw estimate's growth is about four times as dispersed as the filtered series, and the difference is block luck. The bars show each day's luck directly: how far the raw estimate sat above or below the filtered rate at that day's close.</p>
-    <figure>
-      <div class="cap">The day's luck: raw minus filtered (%), last 120 days</div>
-      <div id="ch-luck" class="chart" style="height:280px"></div>
-      <p class="chartnote">Positive bars: block luck flattered the raw estimate that day. The orange marker is the latest day.</p>
-    </figure>
-    <p class="lawline"><b>The filter also predicts.</b> Whatever measures the hashrate best must predict the next day's block count best — no forecast model fitted. Mean Poisson log-likelihood of the next day's count, live, $SCORE_YEARS (n=$SCORE_N): <b>filter $SCORE_PURE</b>, three-day moving average $SCORE_MA3, raw $SCORE_RAW (paper: −4.095, −4.167, −4.484). In blocks, the mean next-day count error is $MAE_PURE for the filter against $MAE_RAW for the raw estimate.</p>
-  </section>
+<section class="sec alt" id="evidence">
+  <div class="wrap">
+    <h2>Most of the raw estimate's daily movement is luck</h2>
+    <div class="nums"><div><span class="v grey">$NOISE_SHARE</span><span class="k">of the variation in the raw estimate's daily changes is luck, 2011 to July 2026</span></div><div><span class="v ac">$LUCK_FULL</span><span class="k">of that luck our filter removes, 2011 to July 2026 ($LUCK_2016 since 2016)</span></div></div>
+    <p class="lede">In every year the raw estimate moves close to what Poisson luck alone produces (dashed line), about $SD_RAW a day. Our filter (orange bars) moves about $SD_FILTER a day, 2011 to July 2026.</p>
+    <figure class="fig"><div id="ch-years" class="chart mid"></div></figure>
 
-  <section class="panel" id="ind3">
-    <div class="ptop"><div class="eyebrow">The moving average's smear</div><span class="tier desc">daily · live</span></div>
-    <h2>And what the three-day average does with it</h2>
-    <div class="answer"><span>$EV_ANSWER</span></div>
-    <div class="claimnum">on the day: raw $EV_GRAW · filter $EV_GPURE · three-day average $EV_GMA3_0 · then the average echoed $EV_GMA3_1 and $EV_GMA3_2 · five days later the filtered level held $EV_HELD5% of the raw move</div>
-    <p class="pnote">Most published series smooth the raw estimate with a moving average. A moving average damps luck and real changes alike, and each day's noise echoes through it for the length of its window. The filter uses the known distribution of the luck instead, so there is no window length to choose. This panel recomputes the comparison around the largest raw daily move of the last 45 complete days, every day.</p>
-    <figure>
-      <div class="cap">Anatomy of the latest large move: the days around $EV_DATE</div>
-      <div id="ch-event" class="chart" style="height:280px"></div>
-      <p class="chartnote">The shaded day is the event. The moving average spends three days digesting what the filter records on the day — and keeps echoing it after the raw series has moved on.</p>
-    </figure>
-  </section>
+    <h2 class="gap">In the 2021 China mining ban our filter showed half of the fall $BAN_HALF_LAG days before the 7-day average</h2>
+    <p class="lede">Our filter showed half of the fall on $BAN_HALF_F and the 7-day average on $BAN_HALF_7, $BAN_HALF_LAG days later. In May and June 2021 China banned bitcoin mining, and our filter fell by more than half, from $BAN_HI EH/s on $BAN_HI_D to $BAN_LO EH/s on $BAN_LO_D. On $BAN_GAP_D the 7-day average was still at $BAN_GAP_7 EH/s, against $BAN_GAP_F EH/s in our filter, because the average still included the six days before, when the hashrate was higher. On 9 Jun 2021 the day's block times pointed to a real change, so our filter moved $BAN_FLAG_K of the way to that day's raw estimate instead of the usual $GAIN.</p>
+    <figure class="fig"><div id="ch-ban" class="chart mid"></div></figure>
 
-  <!-- =================== 3 · THE TWO-SIDED BENCHMARK =================== -->
-  <div class="secthead" id="sec-twosided">The two-sided benchmark<span class="desc">the version that also uses the following days</span></div>
+    <h2 class="gap">How our filter works</h2>
+    <p class="lede">Bitcoin's protocol adjusts the difficulty every 2,016 blocks, about every two weeks, so that the network finds on average 144 blocks a day. Because blocks arrive as a Poisson process, the chance variation of a day's count follows from the expected count itself. On a 144-block day its standard deviation is the square root of 144, which is 12 blocks or 8.3%. A change from one day to the next combines the luck of two days, which gives the $SD_RAW of the raw estimate. Each day our filter moves part of the way from its previous estimate toward the day's raw estimate. When the day's blocks come faster in one part of the day than in the other, which points to a real change in hashrate, our filter moves further.</p>
+    <p class="lede">The two-sided version of our filter also uses the following seven days and removes $P_TWO of the luck, 2011 to July 2026. It is for looking back at history. It cannot be used in real time, and it should not feed a model of how miners respond to price and fees, because each of its values already contains the following week.</p>
+  </div>
+</section>
 
-  <section class="panel" id="ind4">
-    <div class="ptop"><div class="eyebrow">The two-sided line</div><span class="tier desc">benchmark</span></div>
-    <h2>What would the future add?</h2>
-    <div class="answer"><span>$TWO_ANSWER</span></div>
-    <div class="claimnum">RMS difference against the filter: $TWO_RMS_FULL over the full sample · $TWO_RMS_90 over the last 90 days · the latest update revised the tail by at most $TAIL_SHIFT</div>
-    <p class="pnote revnote"><b>This is the only line on the page whose past moves.</b> It uses the following days by construction, so it runs a week behind — days with fewer than seven following days are left empty — and its last days keep being revised as new days arrive. The raw estimate, the filter and the moving average are never revised: once a day is published here, those values for it never change. The paper uses the two-sided version only as a benchmark: it removes more luck ($LUCK_TWO_FULL% on the live sample, 99.1% in the paper) but brings future information into each day's estimate.</p>
-    <figure>
-      <div class="cap">Filter and two-sided benchmark, last 180 days (EH/s)</div>
-      <div id="ch-two" class="chart" style="height:320px"></div>
-      <p class="chartnote">The shaded band marks the two-sided line's last week, the part still being revised as new days arrive. The line stops a week before today by construction.</p>
-    </figure>
-  </section>
-
-  <!-- =================== DOWNLOAD =================== -->
-  <div class="secthead" id="sec-download">Download &amp; citation<span class="desc">the full daily series, and how to cite it</span></div>
-
-  <section class="panel">
-    <div class="ptop"><div class="eyebrow">The series</div><span class="tier desc">CSV · daily</span></div>
-    <h2>The daily series, as a CSV</h2>
-    <p class="pnote">Every figure on this page is computed from one file: <a href="data/daily.csv" download><b>data/daily.csv</b></a> (one row per day, 2011 to $AS_OF, updated daily). Columns: <span class="num">date</span> (UTC calendar day) · <span class="num">n_blocks</span> · <span class="num">difficulty</span> (day mean) · <span class="num">raw</span>, <span class="num">pure</span>, <span class="num">ma3</span> (H/s: the raw one-day estimate, the filter, the trailing three-day moving average) · <span class="num">pure_two_sided</span> (the two-sided benchmark; the last seven days are empty — with fewer than seven following days there is no two-sided estimate yet, and the values fill in as new days arrive) · <span class="num">weight</span> (the arrival-time weight pi) · <span class="num">p_filt</span> (variance of the filtered log level; ±1.96√p_filt is the 95% band in log units). To run the filter on your own block data instead, the package and the paper's reference series are in the <a href="$REPO_URL" target="_blank" rel="noopener">repository</a>.</p>
-    <p class="pnote"><b>Cite as:</b> Wüstenfeld, J. and Geldner, T. (2025). Bitcoin hashrate dynamics: filtering Poisson-luck and identifying responses to price and fees. <i>SSRN Working Paper 5786322</i>. <a href="$PAPER_URL" target="_blank" rel="noopener">papers.ssrn.com/sol3/papers.cfm?abstract_id=5786322</a></p>
-  </section>
-
-  <footer>
-    <p class="fby">Bitcoin Hashrate Dashboard by <a href="$JAN_URL" target="_blank" rel="noopener">Dr. Jan Wüstenfeld</a> and <a href="$TEO_URL" target="_blank" rel="noopener">Teo Geldner</a></p>
-    <p><a href="$PAPER_URL" target="_blank" rel="noopener">The paper (SSRN 5786322)</a> · <a href="$REPO_URL" target="_blank" rel="noopener">The code (GitHub)</a> · <a href="data/daily.csv" download>The series (CSV)</a></p>
-    <p class="fts">Built $BUILT · data as of $AS_OF, the last complete UTC day · block data: Blockchair daily dumps, as in the paper · the two-sided line runs a week behind and its last days revise as new days arrive; everything else never changes.</p>
-    <p class="fbuild">This page republishes no history: days stay exactly as first published, and each new day is added from the stored state of the day before.</p>
-  </footer>
+<section class="sec" id="data">
+  <div class="wrap">
+    <h2>Download the series</h2>
+    <div class="cols">
+      <div>
+        <p class="lede">We add one row per UTC day, from 1 January 2011, once the day is complete. Published values never change, except the last seven days of the two-sided version of our filter.</p>
+        <ul class="dl">
+          <li><a href="data/daily.csv" download data-goatcounter-click="data-csv">data/daily.csv</a> <span>the full daily series</span></li>
+          <li><a href="data/latest.json" data-goatcounter-click="data-json">data/latest.json</a> <span>values for the latest complete day</span></li>
+          <li><a href="data/README.txt" data-goatcounter-click="data-readme">data/README.txt</a> <span>what each column means</span></li>
+          <li><a href="share.png" download="hashrate-filter_$AS_OF_ISO.png" data-goatcounter-click="data-png">share.png</a> <span>the latest chart as an image</span></li>
+        </ul>
+      </div>
+      <div>
+        <p class="lede">If you use the series, please cite our paper.</p>
+        <div class="cite"><p id="cite-text">$CITE_TEXT</p><button class="copy" data-copy="cite-text" data-goatcounter-click="copy-cite">Copy</button></div>
+        <div class="cite"><pre id="cite-bib">$CITE_BIB</pre><button class="copy" data-copy="cite-bib" data-goatcounter-click="copy-bib">Copy BibTeX</button></div>
+      </div>
+    </div>
+  </div>
+</section>
 </main>
 
-<script>
-window.HF = $PAYLOAD;
-</script>
+<footer>
+  <div class="wrap">
+    <p><b>Bitcoin Hashrate Filter</b> by <a href="$JAN_URL" target="_blank" rel="noopener">Dr. Jan Wüstenfeld</a> and <a href="$TEO_URL" target="_blank" rel="noopener">Teo Geldner</a> · <a href="$PAPER_URL" target="_blank" rel="noopener" data-goatcounter-click="foot-paper">Paper (SSRN 5786322)</a> · <a href="$REPO_URL" target="_blank" rel="noopener" data-goatcounter-click="foot-code">Code (GitHub)</a> · <a href="data/daily.csv" download data-goatcounter-click="foot-csv">Data (CSV)</a></p>
+    <p class="fine">Last updated $UPDATED</p>
+  </div>
+</footer>
+
+<script>window.HF = $PAYLOAD;</script>
 <script>
 "use strict";
-var CO = {ink:'#0B0B0D', dim:'#5C616B', faint:'#9DA1A8', rule:'#ECEDEF', btc:'#F26B16', green:'#2C7A5B', amber:'#B0832E', red:'#C24A3A', rawgrey:'#C7CAD0', greyfill:'rgba(11,11,13,.06)', btcfill:'rgba(242,107,22,.10)'};
-var LF = {family:"'JetBrains Mono', monospace", size:11, color:'#9DA1A8'};
-var baseLayout = function(){ return {
-  paper_bgcolor:'#fff', plot_bgcolor:'#fff', font:LF,
-  margin:{l:60,r:20,t:12,b:44}, hovermode:'x unified', showlegend:false,
-  xaxis:{gridcolor:'#F3F4F6', zerolinecolor:'#E2E3E6', linecolor:'#ECEDEF', hoverformat:'%d %b %Y', tickfont:{size:10}},
-  yaxis:{gridcolor:'#F3F4F6', zerolinecolor:'#E2E3E6', linecolor:'#ECEDEF', tickfont:{size:10}}
-};};
-var CONFIG = {responsive:true, displayModeBar:'hover', displaylogo:false,
-  modeBarButtonsToRemove:['lasso2d','select2d','autoScale2d'],
-  toImageButtonOptions:{format:'png', filename:'bitcoin-hashrate-dashboard', scale:2}};
-var chartTitle = function(L, text, minT){
-  L.title={text:text, font:{size:18, family:LF.family, color:CO.ink}, x:0.5, xanchor:'center', yanchor:'top', y:0.945};
-  var legUp = !!(L.showlegend && L.legend && L.legend.orientation==='h');
-  if(legUp) L.legend=Object.assign({}, L.legend, {y:1.02, yanchor:'bottom'});
-  L.margin=Object.assign({}, L.margin, {t:Math.max((L.margin&&L.margin.t)||12, minT||(legUp?92:62))});
-};
-var watermark = function(L, inside){
-  var a = {text:'hashrate-filter · Wüstenfeld &amp; Geldner (2025)', showarrow:false,
-    font:{size:9, family:LF.family, color:CO.faint}, xref:'paper', yref:'paper'};
-  if(inside){ a.x=0.995; a.xanchor='right'; a.y=0.97; a.yanchor='top'; }
-  else { a.x=1; a.xanchor='right'; a.y=-0.14; a.yanchor='top'; a.yshift=-2; }
-  L.annotations = (L.annotations||[]).concat([a]);
-};
+window.__draw = function(){
+if (typeof Plotly === 'undefined' || window.__drawn) return; window.__drawn = true;
 var H = window.HF, D = H.dates, N = D.length;
-var legend = function(x){ return {orientation:'h', x:0, xanchor:'left', y:1.04, yanchor:'bottom', font:{size:10, family:LF.family, color:CO.dim}}; };
-var DAYMS = 24*3600*1000;
-var iso = function(ms){ return new Date(ms).toISOString().slice(0,16).replace('T',' '); };
-var dms = function(i){ return new Date(D[i]+'T00:00:00Z').getTime(); };
-// the two-sided line runs a week behind: index of its last value
-var T_LAST = (function(){ for(var i=N-1;i>=0;i--) if(H.two[i]!=null) return i; return N-1; })();
+var C = {ink:'#0B0B0D', dim:'#5C616B', grid:'#F3F4F6', raw:'#AEB2BA', ma3:'#3E4350', ma7:'#8A8F99', two:'#2C7A5B', f:'#F26B16', band:'rgba(242,107,22,.14)', pre:'rgba(44,122,91,.08)'};
+var F = {family:"'JetBrains Mono', monospace", size:11, color:'#5C616B'};
+var narrow = window.innerWidth < 640;
+var MARKTXT = narrow ? H.mark : H.mark + ' · janwuestenfeld.github.io/hashrate-filter';
+var mark = function(y){ return {text:MARKTXT, showarrow:false, xref:'paper', yref:'paper', x:1, y:(y||0), xanchor:'right', yanchor:'bottom',
+  xshift:-4, yshift:4, bgcolor:'rgba(255,255,255,0.88)', borderpad:3, font:{size:narrow?11:12, color:'#3E4350', family:F.family}}; };
+var base = function(){ return {paper_bgcolor:'rgba(0,0,0,0)', plot_bgcolor:'rgba(0,0,0,0)', font:F, hovermode:'x unified', showlegend:true,
+  hoverlabel:{font:{family:F.family, size:12}},
+  legend:{orientation:'h', x:1, xanchor:'right', y:1.0, yanchor:'bottom', font:{size:11}, itemclick:false, itemdoubleclick:false},
+  margin:{l:56, r:12, t:40, b:40},
+  xaxis:{gridcolor:C.grid, linecolor:'#DADCE0', tickfont:{size:11}}, yaxis:{gridcolor:C.grid, zerolinecolor:'#D5D7DB', tickfont:{size:11}}}; };
+var head = function(L, title, short){
+  if (narrow){ L.title = {text:''}; L.legend = Object.assign(L.legend, {x:0, xanchor:'left', y:1.0, yanchor:'bottom', entrywidth:0.5, entrywidthmode:'fraction'}); L.margin.t = 74; }
+  else { L.title = {text:title, x:0, xanchor:'left', y:0.995, yanchor:'top', font:{size:14, color:C.ink, family:F.family}}; }
+};
+var cfg = function(name){ return {responsive:true, displaylogo:false, displayModeBar:narrow?false:'hover', modeBarButtonsToRemove:['lasso2d','select2d','autoScale2d','toggleSpikelines'],
+  toImageButtonOptions:{format:'png', filename:'hashrate-filter_'+name+'_'+H.asof, scale:2, width:1200, height:675}}; };
+var g = function(a){ var o=[null]; for(var i=1;i<a.length;i++) o.push(a[i]&&a[i-1] ? 100*Math.log(a[i]/a[i-1]) : null); return o; };
+var GR = g(H.raw), GP = g(H.pure), G3 = g(H.ma3), G7 = g(H.ma7);
+var DAY = 864e5, t = function(i){ return new Date(D[i]+'T00:00:00Z').getTime(); }, iso = function(ms){ return new Date(ms).toISOString().slice(0,10); };
+var P0 = N - H.lag;   // first preliminary day of the two-sided line
 
-/* ---------- 1 · main chart ---------- */
+/* ---------- main chart: zoomable, legend toggles ---------- */
 (function(){
-  var bandHi=[], bandLo=[];
-  for(var i=0;i<N;i++){ var b=1.96*Math.sqrt(H.pf[i]); bandHi.push(H.pure[i]*Math.exp(b)); bandLo.push(H.pure[i]*Math.exp(-b)); }
-  var trRaw = {x:D, y:H.raw, type:'scatter', mode:'lines', name:'raw estimate', line:{color:CO.rawgrey, width:0.8}, visible:true};
-  var trBand = {x:D.concat(D.slice().reverse()), y:bandHi.concat(bandLo.slice().reverse()), type:'scatter', mode:'lines', fill:'toself', fillcolor:CO.greyfill, line:{width:0}, name:'95% band', hoverinfo:'skip', visible:false};
-  var trTwo = {x:D, y:H.two, type:'scatter', mode:'lines', name:'two-sided (runs a week behind)', line:{color:CO.green, width:1.1, dash:'dash'}, visible:true};
-  var trPure = {x:D, y:H.pure, type:'scatter', mode:'lines', name:'filtered hashrate (the paper)', line:{color:CO.ink, width:1.7}, visible:true};
-  var trToday = {x:[D[N-1]], y:[H.pure[N-1]], type:'scatter', mode:'markers', name:'today', showlegend:false,
-    marker:{color:CO.btc, size:7, line:{color:'#fff', width:1.5}}, hoverinfo:'skip'};
-  var L = baseLayout();
-  L.showlegend = true; L.legend = legend();
-  L.yaxis.type='log'; L.yaxis.title={text:'EH/s (log)', font:{size:10}};
-  L.xaxis.rangeslider = {visible:true, thickness:0.12, bgcolor:'#FAFAFB'};
-  var i0 = Math.max(0,N-1100);
-  L.xaxis.range = [D[i0], D[N-1]];
-  var lo=Infinity, hi=-Infinity;
-  for(var i=i0;i<N;i++){ lo=Math.min(lo,H.raw[i]); hi=Math.max(hi,H.raw[i]); }
-  L.yaxis.range = [Math.log10(lo*0.85), Math.log10(hi*1.18)];
-  L.margin.b = 70;
-  chartTitle(L, 'Bitcoin network hashrate — raw estimate, filter, two-sided', 92);
-  watermark(L, true);
-  Plotly.newPlot('ch-main', [trRaw, trBand, trTwo, trPure, trToday], L, CONFIG);
-  var bind = function(idx, btn){
-    document.getElementById(btn).addEventListener('click', function(){
-      var vis = this.classList.toggle('on');
-      Plotly.restyle('ch-main', {visible: vis}, [idx]);
-    });
-  };
-  bind(2, 'btn-two'); bind(1, 'btn-band'); bind(0, 'btn-raw');
+  var twoFull = H.two.map(function(v,i){ return i<P0 ? v : null; });
+  var twoPre = H.two.map(function(v,i){ return i>=P0-1 ? v : null; });
+  var T = [
+    {x:D, y:H.raw, type:'scatter', mode:'markers', marker:{size:5, color:C.raw}, name:'raw estimate', hovertemplate:'%{y:,.0f} EH/s'},
+    {x:D, y:H.ma7, type:'scatter', mode:'lines', line:{color:C.ma7, width:1.6, dash:'dash'}, name:'7-day average', visible:'legendonly', hovertemplate:'%{y:,.0f} EH/s'},
+    {x:D, y:H.ma3, type:'scatter', mode:'lines', line:{color:C.ma3, width:1.6, dash:'dot'}, name:'3-day average', hovertemplate:'%{y:,.0f} EH/s'},
+    {x:D, y:twoFull, type:'scatter', mode:'lines', line:{color:C.two, width:1.8}, name:'two-sided version of our filter', legendgroup:'two', hovertemplate:'%{y:,.0f} EH/s'},
+    {x:D, y:twoPre, type:'scatter', mode:'lines', line:{color:C.two, width:1.8, dash:'dot'}, name:'two-sided version of our filter, not final', legendgroup:'two', showlegend:false, hoverinfo:'skip'},
+    {x:D, y:H.two.map(function(v,i){ return i>=P0 ? v : null; }), type:'scatter', mode:'markers', marker:{size:4, color:C.two}, name:'two-sided version of our filter, not final', legendgroup:'two', showlegend:false, hovertemplate:'%{y:,.0f} EH/s, not final yet'},
+    {x:D, y:H.pure, type:'scatter', mode:'lines', line:{color:C.f, width:2.8}, name:'our filter', hovertemplate:'%{y:,.0f} EH/s'}];
+  var L = base();
+  L.shapes = [{type:'rect', xref:'x', yref:'paper', x0:D[P0], x1:D[N-1], y0:0, y1:1, fillcolor:C.pre, line:{width:0}, layer:'below'}];
+  L.legend.itemclick = 'toggle'; L.legend.itemdoubleclick = 'toggleothers';
+  L.dragmode = 'zoom';
+  var i0 = Math.max(0, N-180);
+  var yr = function(a0, a1){ var lo=Infinity, hi=-Infinity;
+    for (var i=0;i<N;i++){ if (D[i]<a0 || D[i]>a1) continue; lo=Math.min(lo,H.raw[i]||Infinity,H.pure[i]); hi=Math.max(hi,H.raw[i]||-Infinity,H.pure[i]); }
+    return [lo*0.96, hi*1.03]; };
+  L.xaxis = Object.assign(L.xaxis, {range:[D[i0], D[N-1]], rangeslider:{visible:true, thickness:0.09, bgcolor:'#F7F7F8'}, type:'date'});
+  L.yaxis = Object.assign(L.yaxis, {title:{text:'EH/s', font:{size:11}}, range:yr(D[i0], D[N-1]), fixedrange:false});
+  L.margin.b = 30;
+  head(L, 'Bitcoin network hashrate to '+H.asof_txt);
+  L.annotations = [mark(0.12), {x:D[N-1], y:1, xref:'x', yref:'paper', xanchor:'right', yanchor:'top', showarrow:false, text:'two-sided version: last '+H.lag+' days not final', font:{size:11, color:C.two}}];
+  Plotly.newPlot('ch-main', T, L, cfg('main'));
+  var el = document.getElementById('ch-main'), busy = false;
+  el.on('plotly_relayout', function(ev){
+    if (busy) return;
+    var r = el.layout.xaxis.range; if (!r) return;
+    var a0 = String(r[0]).slice(0,10), a1 = String(r[1]).slice(0,10);
+    busy = true; Plotly.relayout(el, {'yaxis.range': yr(a0, a1)}).then(function(){ busy = false; });
+  });
 })();
 
-/* ---------- 2 · luck bars ---------- */
+/* ---------- the typical daily move, year by year ---------- */
 (function(){
-  var W=120, i0=N-W, x=D.slice(i0), y=[];
-  for(var i=i0;i<N;i++) y.push(100*Math.log(H.raw[i]/H.pure[i]));
-  var tr = {x:x, y:y, type:'bar', name:'raw minus filtered', marker:{color:CO.faint, opacity:0.55}};
-  var trToday = {x:[x[x.length-1]], y:[y[y.length-1]], type:'scatter', mode:'markers', showlegend:false,
-    marker:{color:CO.btc, size:7, line:{color:'#fff', width:1.5}}, hoverinfo:'skip'};
-  var L = baseLayout();
-  L.yaxis.title={text:'%', font:{size:10}}; L.yaxis.zeroline=true; L.yaxis.zerolinecolor='#D8DADE';
-  L.xaxis.range=[iso(dms(i0)-DAYMS), iso(dms(N-1)+DAYMS)];
-  chartTitle(L, 'The day\u2019s luck: raw minus filtered', 62);
-  watermark(L);
-  Plotly.newPlot('ch-luck', [tr, trToday], L, CONFIG);
+  var yrs=[], acc={};
+  for(var i=1;i<N;i++){ if(GR[i]===null || GP[i]===null) continue; var y=D[i].slice(0,4);
+    if(!acc[y]){ acc[y]={n:0,a:0,aa:0,b:0,bb:0}; yrs.push(y); } var o=acc[y]; o.n++; o.a+=GR[i]; o.aa+=GR[i]*GR[i]; o.b+=GP[i]; o.bb+=GP[i]*GP[i]; }
+  var sd=function(s,ss,n){ return Math.sqrt((ss-s*s/n)/(n-1)); };
+  var sr=yrs.map(function(y){ var o=acc[y]; return sd(o.a,o.aa,o.n); }), sp=yrs.map(function(y){ var o=acc[y]; return sd(o.b,o.bb,o.n); });
+  var GT=g(H.two), at={}; for(var i=1;i<N;i++){ if(GT[i]===null) continue; var y=D[i].slice(0,4); if(!at[y]) at[y]={n:0,a:0,aa:0}; at[y].n++; at[y].a+=GT[i]; at[y].aa+=GT[i]*GT[i]; }
+  var stw=yrs.map(function(y){ var o=at[y]; return o?sd(o.a,o.aa,o.n):null; });
+  var luck=100*Math.sqrt(2/144);
+  var T=[{x:yrs, y:sr, type:'bar', name:'raw estimate', marker:{color:C.raw}, hovertemplate:'%{y:.1f}%'},
+         {x:yrs, y:sp, type:'bar', name:'our filter', marker:{color:C.f}, hovertemplate:'%{y:.1f}%'},
+         {x:[yrs[0], yrs[yrs.length-1]], y:[luck,luck], type:'scatter', mode:'lines', line:{color:C.ink, width:1.4, dash:'dash'}, name:'luck alone (Poisson)', hoverinfo:'skip'}];
+  var L=base(); L.barmode='group'; L.hovermode='x unified';
+  L.yaxis.title={text:'typical daily change, %', font:{size:11}}; L.yaxis.rangemode='tozero';
+  head(L, 'Typical daily change by year: raw estimate, our filter and luck alone');
+  L.annotations=[mark()];
+  Plotly.newPlot('ch-years', T, L, cfg('daily-move-by-year'));
 })();
 
-/* ---------- 2b · anatomy of the latest large move ---------- */
+/* ---------- the 2021 mining ban ---------- */
 (function(){
-  var gRaw=[null], gPure=[null], gMa3=[null];
-  for(var i=1;i<N;i++){ gRaw.push(100*Math.log(H.raw[i]/H.raw[i-1])); gPure.push(100*Math.log(H.pure[i]/H.pure[i-1])); gMa3.push(100*Math.log(H.ma3[i]/H.ma3[i-1])); }
-  var i0=H.ev.win[0], i1=H.ev.win[1], x=D.slice(i0,i1+1);
-  var bar = function(g, name, color){ return {x:x, y:g.slice(i0,i1+1), type:'bar', name:name, marker:{color:color}}; };
-  var L = baseLayout();
-  L.barmode='group'; L.showlegend=true; L.legend=legend();
-  L.yaxis.title={text:'% / day', font:{size:10}}; L.yaxis.zeroline=true; L.yaxis.zerolinecolor='#D8DADE';
-  L.xaxis.range=[iso(dms(i0)-DAYMS), iso(dms(i1)+DAYMS)];
-  L.shapes=[{type:'rect', xref:'x', yref:'paper', x0:iso(dms(H.ev.i)-DAYMS/2), x1:iso(dms(H.ev.i)+DAYMS/2), y0:0, y1:1,
-    fillcolor:CO.btcfill, line:{width:0}, layer:'below'}];
-  L.annotations=[{x:D[H.ev.i], y:1, xref:'x', yref:'paper', yanchor:'bottom', text:'the move',
-    showarrow:false, font:{size:9, family:LF.family, color:CO.btc}}];
-  chartTitle(L, 'Anatomy of the latest large move', 92);
-  watermark(L);
-  Plotly.newPlot('ch-event', [bar(gRaw,'raw estimate',CO.faint), bar(gMa3,'three-day moving average',CO.amber), bar(gPure,'filtered',CO.ink)], L, CONFIG);
+  var a=D.indexOf('2021-05-10'), z=D.indexOf('2021-07-10');
+  var s=function(arr){ return arr.slice(a,z+1); }, x=s(D);
+  var T=[{x:x, y:s(H.raw), type:'scatter', mode:'markers', marker:{size:6, color:C.raw}, name:'raw estimate', hovertemplate:'%{y:,.0f} EH/s'},
+         {x:x, y:s(H.ma7), type:'scatter', mode:'lines', line:{color:C.ma7, width:2, dash:'dash'}, name:'7-day average', hovertemplate:'%{y:,.0f} EH/s'},
+         {x:x, y:s(H.pure), type:'scatter', mode:'lines', line:{color:C.f, width:3}, name:'our filter', hovertemplate:'%{y:,.0f} EH/s'}];
+  var L=base(); L.hovermode='x unified'; L.yaxis.title={text:'EH/s', font:{size:11}}; L.yaxis.range=[50,200];
+  head(L, 'Hashrate in the 2021 China mining ban: our filter, 7-day average and raw estimate');
+  L.annotations=[mark()]; L.shapes=[];
+  L.shapes.push({type:'line', xref:'paper', yref:'y', x0:0, x1:1, y0:H.ban.half, y1:H.ban.half, line:{color:C.dim, width:1, dash:'dot'}});
+  L.annotations.push({x:1, y:H.ban.half, xref:'paper', yref:'y', xanchor:'right', yanchor:'bottom', showarrow:false, text:'half of the fall, '+Math.round(H.ban.half)+' EH/s', font:{size:11, color:C.dim}});
+  var g=H.ban.gapD;
+  L.shapes.push({type:'line', xref:'x', yref:'y', x0:g, x1:g, y0:H.ban.gapF, y1:H.ban.gap7, line:{color:C.ink, width:1.5}});
+  L.annotations.push({x:g, y:H.ban.gap7, xref:'x', yref:'y', xanchor:'left', yanchor:'bottom', xshift:6, showarrow:false,
+     text:(narrow?'':'7-day average ')+Math.round(H.ban.gap7)+' against our filter '+Math.round(H.ban.gapF)+' EH/s', font:{size:12, color:C.ink}});
+  var j=D.indexOf('2021-06-09');
+  if (j>=0){ L.shapes.push({type:'line', xref:'x', yref:'paper', x0:D[j], x1:D[j], y0:0, y1:1, line:{color:C.dim, width:1, dash:'dot'}});
+    L.annotations.push({x:D[j], y:0.04, xref:'x', yref:'paper', xanchor:'right', yanchor:'bottom', xshift:-4, showarrow:false, text:narrow?'9 Jun':'9 Jun: block times point to a real fall', font:{size:11, color:C.dim}}); }
+  Plotly.newPlot('ch-ban', T, L, cfg('mining-ban-2021'));
 })();
+};
+if (typeof Plotly !== 'undefined') window.__draw(); else window.addEventListener('load', window.__draw);
 
-/* ---------- 3 · two-sided, last 180 days ---------- */
-(function(){
-  var W=180, i0=N-W, x=D.slice(i0);
-  var trTwo = {x:x, y:H.two.slice(i0), type:'scatter', mode:'lines', name:'two-sided benchmark', line:{color:CO.green, width:1.4, dash:'dash'}};
-  var trPure = {x:x, y:H.pure.slice(i0), type:'scatter', mode:'lines', name:'filtered', line:{color:CO.ink, width:1.6}};
-  var trToday = {x:[D[N-1]], y:[H.pure[N-1]], type:'scatter', mode:'markers', showlegend:false,
-    marker:{color:CO.btc, size:7, line:{color:'#fff', width:1.5}}, hoverinfo:'skip'};
-  var L = baseLayout();
-  L.showlegend=true; L.legend=legend();
-  L.yaxis.title={text:'EH/s', font:{size:10}};
-  var j0=Math.max(i0, T_LAST-6);
-  L.shapes=[{type:'rect', xref:'x', yref:'paper', x0:D[j0], x1:D[T_LAST], y0:0, y1:1,
-    fillcolor:CO.btcfill, line:{width:0}, layer:'below'}];
-  L.annotations=[{x:D[T_LAST], y:0.03, xref:'x', yref:'paper', text:'still revising as new days arrive',
-    showarrow:false, font:{size:9, family:LF.family, color:CO.btc}, xanchor:'right'}];
-  chartTitle(L, 'The two-sided benchmark, last 180 days', 92);
-  watermark(L);
-  Plotly.newPlot('ch-two', [trTwo, trPure, trToday], L, CONFIG);
-})();
+document.querySelectorAll('.copy').forEach(function(b){ b.addEventListener('click', function(){
+  var el=document.getElementById(b.dataset.copy); navigator.clipboard.writeText(el.innerText).then(function(){ var t0=b.innerText; b.innerText='Copied'; setTimeout(function(){ b.innerText=t0; },1500); }); }); });
 </script>
 </body>
 </html>
 """)
 
 
-def write_site(
-    df: pd.DataFrame,
-    meta: dict,
-    out: Path,
-    *,
-    site_url: str,
-    repo_root: Path,
-    css_src: Path,
-    tail_shift: float,
-    fetched_utc: str,
-) -> None:
-    st = compute_stats(df, meta, tail_shift)
-    payload = build_payload(df, st)
+def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetched_utc, blocks=None):
     out = Path(out)
+    st, d = compute_stats(df, meta)
+    as_of_iso = str(st["as_of"].date())
 
-    ev_date = st["ev_date"]
-    # the event answer line, worded by what the move turned out to be
-    move = st["ev_graw"]
-    direction = "jumped" if move > 0 else "dropped"
-    rev = st["ev_next_raw"]  # share of the move undone the next day (negative: reversal)
-    rev_txt = ""
-    if rev < -25:
-        back = "recouped" if move < 0 else "gave back"
-        rev_txt = f" and {back} {abs(rev):.0f}% of it the next day"
-    ma = [fmt_pct(v) for v in st["ev_gma3"]]
-    graw, gpure = fmt_pct(move), fmt_pct(st["ev_gpure"])
-    held = f"{st['ev_held5']:.0f}"
-    if st["ev_kind"] == "luck":
-        ev_answer = (
-            f"On <b>{fmt_date(ev_date)}</b>, the raw estimate {direction} <b>{graw}</b>{rev_txt} — mostly block luck: "
-            f"five days later the filtered level held {held}% of the move. The filter read <b>{gpure}</b> on the day; "
-            f"the three-day average spread it over three (<b>{ma[0]}</b> on the day, then <b>{ma[1]}</b> and <b>{ma[2]}</b>)."
-        )
-    else:
-        ev_answer = (
-            f"On <b>{fmt_date(ev_date)}</b>, the raw estimate {direction} <b>{graw}</b> and held it: "
-            f"five days later the filtered level kept {held}% of the move. The filter recorded <b>{gpure}</b> on the day "
-            f"itself — the three-day average needed three days (<b>{ma[0]}</b> on the day, then <b>{ma[1]}</b> and <b>{ma[2]}</b>)."
-        )
-    # the two-sided answer line: honest in quiet and in fast-moving weeks
-    two_tail7 = st["two_tail7"]
-    if two_tail7 < 1.0:
-        two_answer = (
-            f"Not much — but you wait a week for it. The two-sided version also reads the following days, "
-            f"so it runs a week behind; across its last week it sits within <b>{two_tail7:.2f}%</b> of the daily filter."
-        )
-    else:
-        two_answer = (
-            f"In a fast move like the current one, up to <b>{two_tail7:.2f}%</b> — and you wait a week for it. "
-            f"The two-sided version also reads the following days, so it runs a week behind; the gap is where "
-            f"the daily filter still lags the move."
-        )
-    description = (
-        "Bitcoin's network hashrate without the luck: the raw daily estimate against the filtered series of "
-        "Wüstenfeld and Geldner (2025), updated daily. See how much of the raw move is block luck, how the "
-        "three-day moving average smears it, and the two-sided benchmark."
-    )
+    hours = hourly_counts(blocks, st["as_of"])
+    if hours is not None and sum(hours) != st["n"]:
+        hours = None
+    if hours is None:   # a later run of the same day: reuse the published hours
+        try:
+            with urllib.request.urlopen(site_url + "data/lastday.json", timeout=20) as r:
+                prev = json.loads(r.read().decode())
+            if prev.get("date") == as_of_iso and sum(prev.get("hours", [])) == st["n"]:
+                hours = prev["hours"]
+        except Exception:
+            hours = None
 
-    values = {
-        "DESCRIPTION": description,
-        "SITE_URL": site_url,
-        "PAPER_URL": PAPER_URL,
-        "REPO_URL": REPO_URL,
-        "JAN_URL": JAN_URL,
-        "TEO_URL": TEO_URL,
-        "AS_OF": fmt_date(st["as_of"]),
-        "TWO_LAST": fmt_date(st["two_last"]),
-        "BUILT": pd.Timestamp.utcnow().strftime("%d %b %Y %H:%M UTC") + (
-            f" · block data fetched {fetched_utc}" if fetched_utc else ""
-        ),
-        "PURE_EH": f"{st['pure_eh']:,.1f}",
-        "RAW_EH": f"{st['raw_eh']:,.1f}",
-        "D1": fmt_pct(st["d1"]),
-        "D7": fmt_pct(st["d7"]),
-        "N_LAST": f"{st['n_last']}",
-        "LUCK_LAST": fmt_pct(st["luck_last"]),
-        "LUCK_LAST_ABS": f"{abs(st['luck_last']):.1f}%",
-        "LUCK_SIDE": "above" if st["luck_last"] >= 0 else "below",
-        "LUCK_16": f"{st['luck_pure_16']:.1f}",
-        "LUCK_TWO_FULL": f"{st['luck_two_full']:.1f}",
-        "SD_RAW_16": f"{st['sd_raw_16']:.1f}",
-        "SD_PURE_16": f"{st['sd_pure_16']:.1f}",
-        "SD_RAW_FULL": f"{st['sd_raw_full']:.1f}",
-        "SD_PURE_FULL": f"{st['sd_pure_full']:.1f}",
-        "SCORE_PURE": f"{st['score_pure']:.3f}",
-        "SCORE_MA3": f"{st['score_ma3']:.3f}",
-        "SCORE_RAW": f"{st['score_raw']:.3f}",
-        "SCORE_YEARS": f"{st['score_years'][0]}–{st['score_years'][1]}",
-        "SCORE_N": f"{st['score_n']:,}",
-        "MAE_PURE": f"{st['mae_pure']:.1f}",
-        "MAE_RAW": f"{st['mae_raw']:.1f}",
-        "EV_DATE": fmt_date(ev_date),
-        "EV_GRAW": fmt_pct(st["ev_graw"]),
-        "EV_GPURE": fmt_pct(st["ev_gpure"]),
-        "EV_GMA3_0": fmt_pct(st["ev_gma3"][0]),
-        "EV_GMA3_1": fmt_pct(st["ev_gma3"][1]),
-        "EV_GMA3_2": fmt_pct(st["ev_gma3"][2]),
-        "EV_HELD5": held,
-        "EV_ANSWER": ev_answer,
-        "TWO_TAIL7": f"{st['two_tail7']:.2f}%",
-        "TWO_ANSWER": two_answer,
-        "TWO_RMS_FULL": f"{st['two_rms_full']:.2f}%",
-        "TWO_RMS_90": f"{st['two_rms_90']:.2f}%",
-        "TAIL_SHIFT": f"{st['tail_shift']:.2f}%",
-        "Q_QUIET": f"{st['q_quiet']:.3e}",
-        "PRIOR": f"{st['prior']:.4f}",
-        "PAYLOAD": payload,
+    def esc(s):
+        return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    if st["ev"] > 0:
+        ev_lede = (f"On {fmt_date(st['ev_d'])} the raw estimate moved {fmt_pct(st['ev_g'])} in a day. That day entered "
+                   f"the three-day average at a third of its size, and three days later, when it left the window, "
+                   f"the average moved {fmt_pct(st['ev_g3'])}.")
+    else:
+        ev_lede = ("A lucky day enters a three-day average at a third of its size and leaves it three days later "
+                   "in the opposite direction, so the average shows a move that never happened.")
+    w_cmp = ("the value it takes on most days" if abs(st["w_last"] - st["w_typ"]) < 5e-3
+             else f"against {st['w_typ']:.2f} on most days")
+
+    v = {
+        "DESC": "Bitcoin's daily hashrate without the block luck. Our filter uses the Poisson arrival of blocks to remove "
+                "most of the luck in the raw daily estimate. We update the series daily, and it is free to download.",
+        "SITE_URL": site_url, "PAPER_URL": PAPER_URL, "REPO_URL": REPO_URL, "JAN_URL": JAN_URL, "TEO_URL": TEO_URL,
+        "AS_OF": fmt_date(st["as_of"]), "AS_OF_ISO": as_of_iso, "LAG": str(TWO_LAG),
+        "PURE": fmt_eh(st["pure"]), "BAND_LO": f"{st['band_lo']:,.0f}", "BAND_HI": f"{st['band_hi']:,.0f}",
+        "RAW": fmt_eh(st["raw"]),
+        "RAW_GAP": (f"{abs(100 * (st['raw'] / st['pure'] - 1)):.1f}% " + ("below" if st["raw"] < st["pure"] else "above")), "N": str(st["n"]), "N_LO": str(st["n_lo"]), "N_HI": str(st["n_hi"]),
+        "LAM": f"{st['lam']:.0f}",
+        "LAM_WHY": (f"At the current difficulty our filtered hashrate implies {st['lam']:.0f} blocks a day, about {st['lam'] / 24:.0f} an hour, "
+                    + ("because the hashrate is slightly below the level the current difficulty was set for." if st["lam"] < 143.5 else
+                       "because the hashrate is slightly above the level the current difficulty was set for." if st["lam"] > 144.5 else
+                       "in line with the target.")), "LAM_H": f"{st['lam'] / 24:.1f}", "H_LO": str(st["h_lo"]), "H_HI": str(st["h_hi"]),
+        "D1": fmt_pct(st["d1"]), "D7": fmt_pct(st["d7"]), "G_BAND": f"{1.96 * PAPER['growth_unc']:.1f}%",
+        "SD_RAW": PAPER["sd_raw"], "SD_FILTER": PAPER["sd_filter"], "NOISE_SHARE": PAPER["noise_share"],
+        "LUCK_FULL": PAPER["luck_full"], "LUCK_2016": PAPER["luck_2016"],
+        "SD_R": f"{st['sd']['raw']:.1f}%", "SD_3": f"{st['sd']['ma3']:.1f}%", "SD_7": f"{st['sd']['ma7']:.1f}%", "SD_F": f"{st['sd']['pure']:.1f}%", "SD_T": f"{st['sd']['pure_two_sided']:.1f}%",
+        "ACF_FROM": "2016", "ACF_RAW": neg(st["acf_raw1"]), "ACF_MA3": neg(st["acf_ma3_3"]), "ACF_MA7": neg(st["acf_ma7_7"]),
+        "ACF_PURE": neg(st["acf_pure_max"]), "P_ACF3": PAPER["ma_acf3"],
+        "GAIN": f"{100 * st['gain']:.0f}%",
+        "LK_N": str(st["n_hi"]), "LK_RAW": fmt_pct(st["lk"]["raw"], sign=False), "LK_M3": fmt_pct(st["lk"]["m3"], sign=False),
+        "LK_M7": fmt_pct(st["lk"]["m7"], sign=False), "LK_F0": fmt_pct(st["lk"]["f0"], sign=False), "LK_F1": fmt_pct(st["lk"]["f1"]),
+        "EV_LEDE": ev_lede,
+        "W_LAST": f"{st['w_last']:.2f}", "W_CMP": w_cmp, "W_N": str(st["w_n"]),
+        "HOURS_CLASS": "" if hours is not None else "hidden",
+        "BAN_HI": f"{st['ban_hi']:.0f}", "BAN_HI_D": fmt_date(st["ban_hi_d"]),
+        "BAN_LO": f"{st['ban_lo']:.0f}", "BAN_LO_D": fmt_date(st["ban_lo_d"]),
+        "BAN_LO7_D": fmt_date(st["ban_lo7_d"]), "BAN_LAG7": str(st["ban_lag7"]), "BAN_HALF_F": fmt_date(st["ban_half_f"]), "BAN_HALF_7": fmt_date(st["ban_half_7"]),
+        "BAN_HALF_LAG": str(st["ban_half_lag"]), "BAN_GAP_D": fmt_date(st["ban_gap_d"]), "BAN_GAP_7": f"{st['ban_gap_7']:.0f}", "BAN_GAP_F": f"{st['ban_gap_f']:.0f}", "BAN_FLAG_K": f"{100 * st['ban_flag_k']:.0f}%",
+        "P_BAN": PAPER["ban"], "P_GAIN": PAPER["gain_day"], "P_WEEK": PAPER["gain_week"],
+        "P_COV": PAPER["cov_quiet"], "P_COV1": PAPER["cov_jump1"], "P_COV2": PAPER["cov_jump2"], "P_TWO": PAPER["luck_two"],
+        "Q_QUIET": f"{float(meta['q_quiet']):.2e}", "Q_JUMP": f"{Q_JUMP:.2e}",
+        "CITE_TEXT": esc(CITE_TEXT), "CITE_BIB": esc(CITE_BIB),
+        "UPDATED": fmt_date(pd.Timestamp.utcnow()),
+        "PAYLOAD": payload(d, st, hours),
+        "CSS": Path(css_src).read_text(),
     }
-
-    html = TEMPLATE.substitute(values)
+    html = TEMPLATE.substitute(v)
+    assert "—" not in html, "em-dash in page"
     (out / "site").mkdir(parents=True, exist_ok=True)
+    (out / "data").mkdir(parents=True, exist_ok=True)
     (out / "index.html").write_text(html)
     shutil.copy(css_src, out / "site" / "dashboard.css")
-    og_src = repo_root / "examples" / "figures" / "filter_overview.png"
-    if og_src.exists():
-        shutil.copy(og_src, out / "og-card.png")
+
+    latest = {
+        "date": as_of_iso, "pure_eh_s": round(st["pure"], 2),
+        "raw_eh_s": round(st["raw"], 2), "n_blocks": st["n"],
+        "change_day_pct": round(st["d1"], 2), "change_week_pct": round(st["d7"], 2),
+        "source": "Blockchair daily block dumps; filter of Wüstenfeld and Geldner",
+        "cite": CITE_TEXT, "paper": PAPER_URL, "code": REPO_URL, "url": site_url,
+    }
+    (out / "data" / "latest.json").write_text(json.dumps(latest, ensure_ascii=False, indent=1))
+    if hours is not None:
+        (out / "data" / "lastday.json").write_text(json.dumps({"date": as_of_iso, "hours": hours}))
+    (out / "data" / "README.txt").write_text(
+        "Bitcoin Hashrate Filter: the daily Bitcoin hashrate without the Poisson luck of block discovery\n"
+        f"{site_url}\n\n"
+        "daily.csv has one row per UTC day since 2011. Columns:\n"
+        "  date                  the UTC day\n"
+        "  n_blocks              blocks found that day\n"
+        "  difficulty            average difficulty that day\n"
+        "  raw                   raw estimate of the hashrate from that day's blocks, in H/s\n"
+        "  pure                  our filter, in H/s\n"
+        "  pure_two_sided        two-sided version of our filter, in H/s (last 7 days not final)\n"
+        "  ma3                   3-day average of the raw estimate, in H/s\n"
+        "  weight                how strongly that day's block times point to a real change (0 to 1)\n"
+        "  p_filt                variance of our filter's estimate in log terms (a 95% range is pure x exp(+-1.96 x sqrt(p_filt)))\n"
+        "  two_sided_days_after  how many of the following 7 days the two-sided value already uses\n\n"
+        "Published values never change, except pure_two_sided while two_sided_days_after is below 7.\n"
+        "We assign each block to a UTC day by its median time past (the median time stamp of the last 11 blocks), the time the protocol uses for its rules.\n"
+        "A 7-day average is raw.rolling(7, min_periods=1).mean().\n\n"
+        f"Please cite: {CITE_TEXT}\n{PAPER_URL}\nCode: {REPO_URL}\n"
+    )
+    share_images(d, st, out, site_url)

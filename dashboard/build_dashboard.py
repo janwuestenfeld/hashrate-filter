@@ -68,11 +68,11 @@ N_MIN, N_MAX = 40, 400            # historical range: 58 to 307 blocks/day
 D_RATIO_MIN, D_RATIO_MAX = 0.2, 5.0  # day-over-day mean difficulty
 GROWTH_MAX = 0.9                  # |raw daily growth| (historical max 0.59)
 
-# The two-sided estimate uses the following days by construction, so with
-# fewer than this many following days there is no two-sided estimate yet:
-# the line runs a week behind and those days are left empty (they fill in
-# as new days arrive). Published days of the paper's sample are exempt —
-# they carry the paper's published values.
+# The two-sided estimate uses the following days by construction. Days with
+# fewer than this many following days are preliminary: published, marked on
+# the page and counted in the CSV, and they move toward the full value as
+# new days arrive. Published days of the paper's sample are exempt and keep
+# the paper's published values.
 TWO_SIDED_LAG = 7
 
 
@@ -110,14 +110,19 @@ def load_state(args) -> pd.DataFrame:
             log(f"state URL unavailable ({e}); bootstrapping from the stored history")
             text = (DATA / "history.csv").read_text()
     df = pd.read_csv(io.StringIO(text), parse_dates=["date"])
-    if list(df.columns) != COLUMNS:
-        raise GateFailure(f"state columns {list(df.columns)} != expected {COLUMNS}")
+    if not set(COLUMNS) <= set(df.columns):
+        raise GateFailure(f"state columns {list(df.columns)} lack {sorted(set(COLUMNS) - set(df.columns))}")
+    df = df[COLUMNS]   # derived columns of the published file are rebuilt on write
     return df.sort_values("date").reset_index(drop=True)
 
 
 def write_state(df: pd.DataFrame, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False, float_format="%.17g", date_format="%Y-%m-%d")
+    out = df[COLUMNS].copy()
+    # how many following days the two-sided value uses; below TWO_SIDED_LAG it is preliminary
+    after = np.arange(len(out))[::-1]
+    out["two_sided_days_after"] = np.minimum(after, TWO_SIDED_LAG)
+    out.to_csv(path, index=False, float_format="%.17g", date_format="%Y-%m-%d")
 
 
 # ---------------------------------------------------------------- gates
@@ -288,6 +293,10 @@ def append_new_days(
     # older days keep their stored values.
     first_new = len(df) - n_added
     a = max(0, first_new - daily_step.TAIL_WINDOW)
+    # the paper's days keep the paper's published values (G1 checks them on every run)
+    post_idx = np.flatnonzero((df["date"] > end).values)
+    if len(post_idx):
+        a = max(a, int(post_idx[0]))
     revised = np.exp(
         daily_step.rts_tail(
             np.log(df["pure"].values[a:]),
@@ -296,7 +305,10 @@ def append_new_days(
         )
     )
     stored = df["pure_two_sided"].values[a:]
-    had_value = ~np.isnan(stored)
+    # only days that already had a full week after them count: the preliminary
+    # trailing week is expected to move as its following days arrive
+    full_week = np.arange(a, a + len(stored)) < first_new - TWO_SIDED_LAG
+    had_value = ~np.isnan(stored) & full_week
     shift = 0.0
     if had_value.any():
         # G5: revisions of previously stored days stay within the plausible
@@ -308,14 +320,10 @@ def append_new_days(
     new_two_sided = df["pure_two_sided"].values.copy()
     new_two_sided[a:] = revised
 
-    # The two-sided line runs a week behind: with fewer than TWO_SIDED_LAG
-    # following days there is no two-sided estimate yet, so the trailing
-    # days are left empty (they fill in as new days arrive). Published days
-    # of the paper's sample keep the paper's published values.
-    post = (df["date"] > end).values
-    if post.any():
-        blank = np.flatnonzero(post)[-TWO_SIDED_LAG:]
-        new_two_sided[blank] = np.nan
+    # The two-sided line runs up to the last day: on the last day it equals
+    # the filter, and each further day pulls it toward the full two-sided
+    # value. Days with fewer than TWO_SIDED_LAG following days are
+    # preliminary (marked on the page and counted in the published CSV).
     df["pure_two_sided"] = new_two_sided
     return df, n_added, shift
 
@@ -369,6 +377,7 @@ def main() -> None:
         site_url=SITE_URL, repo_root=REPO, css_src=SITE_DIR / "dashboard.css",
         tail_shift=tail_shift,
         fetched_utc=fetched_utc,
+        blocks=blocks,
     )
     log(f"wrote site to {out}")
     log(f"as of {df['date'].iloc[-1].date()}: filtered {df['pure'].iloc[-1] / 1e18:.1f} EH/s, "
