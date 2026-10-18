@@ -77,6 +77,11 @@ def fmt_eh(x) -> str:
     return f"{x:,.0f}"
 
 
+def chg_cls(x) -> str:
+    """CSS class of a change: up, down or flat (as shown to one decimal)."""
+    return "flat" if round(abs(x), 1) == 0 else ("up" if x > 0 else "dn")
+
+
 def move(x) -> str:
     """A change in words: "up 1.1%", "down 2.0%", "unchanged"."""
     return "unchanged" if round(abs(x), 1) == 0 else f"{'up' if x > 0 else 'down'} {abs(x):.1f}%"
@@ -313,7 +318,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
       <div class="tile main">
         <div class="k">Our filter</div>
         <div class="v">$PURE <span class="u">EH/s</span></div>
-        <div class="s">$D1_TXT from the day before, $D7_TXT from a week before</div>
+        <div class="s"><span class="chg $D1_CLS">$D1</span> vs day before<br><span class="chg $D7_CLS">$D7</span> vs week before</div>
       </div>
       <div class="tile">
         <div class="k">Raw estimate</div>
@@ -574,7 +579,7 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
                     + ("because the hashrate is slightly below the level the current difficulty was set for." if st["lam"] < 143.5 else
                        "because the hashrate is slightly above the level the current difficulty was set for." if st["lam"] > 144.5 else
                        "in line with the target.")), "LAM_H": f"{st['lam'] / 24:.1f}", "H_LO": str(st["h_lo"]), "H_HI": str(st["h_hi"]),
-        "D1": fmt_pct(st["d1"]), "D1_TXT": move(st["d1"]).capitalize(), "D7_TXT": move(st["d7"]), "D7": fmt_pct(st["d7"]), "G_BAND": f"{1.96 * PAPER['growth_unc']:.1f}%",
+        "D1": fmt_pct(st["d1"]), "D1_CLS": chg_cls(st["d1"]), "D7_CLS": chg_cls(st["d7"]), "D7": fmt_pct(st["d7"]), "G_BAND": f"{1.96 * PAPER['growth_unc']:.1f}%",
         "SD_RAW": PAPER["sd_raw"], "SD_FILTER": PAPER["sd_filter"], "NOISE_SHARE": PAPER["noise_share"],
         "LUCK_FULL": PAPER["luck_full"], "LUCK_2016": PAPER["luck_2016"],
         "SD_R": f"{st['sd']['raw']:.1f}%", "SD_3": f"{st['sd']['ma3']:.1f}%", "SD_7": f"{st['sd']['ma7']:.1f}%", "SD_F": f"{st['sd']['pure']:.1f}%", "SD_T": f"{st['sd']['pure_two_sided']:.1f}%",

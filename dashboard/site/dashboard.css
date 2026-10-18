@@ -46,6 +46,8 @@ h1 .ac{color:var(--f)}
 .tile.main .v{color:var(--f)}
 .tile .u{font-size:14px;color:var(--faint);font-weight:500}
 .tile .s{font-size:14px;color:var(--dim);margin-top:4px}
+.chg{font-family:var(--mono);font-weight:600;font-size:13px;padding:1px 6px;border-radius:4px;margin-right:4px;font-variant-numeric:tabular-nums}
+.chg.up{color:#15803D;background:#E8F5EC}.chg.dn{color:#C0362C;background:#FBEAE8}.chg.flat{color:var(--dim);background:var(--alt)}
 
 /* sections: a 2 px ink rule marks each chapter */
 .sec{padding:30px 0 60px;scroll-margin-top:56px}
