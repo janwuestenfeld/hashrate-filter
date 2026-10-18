@@ -317,9 +317,13 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <section class="sec">
   <div class="wrap">
     <h2>Our filter follows the hashrate without the daily luck of the raw estimate</h2>
-    <p class="lede">Grey dots are the raw estimate, the orange line is our filter and the dotted line the 3-day average. The 7-day average is hidden, and you can show it by clicking it in the legend. Drag across the chart to zoom, double-click to zoom out, and use the buttons below it to show the history since 2011.</p>
+    <p class="lede">Grey dots, joined by a thin line, are the raw estimate, the orange line is our filter and the dotted line the 3-day average. The 7-day average is hidden, and you can show it by clicking it in the legend. Drag across the chart to zoom, double-click to zoom out, and use the buttons below it to show the history since 2011.</p>
     <figure class="fig"><div id="ch-main" class="chart tall"></div></figure>
     <p class="note">The green line is the two-sided version of our filter. It also uses the following seven days, so its last seven days (shaded, dotted) are not final and change as new days come in. Use the orange line for real-time work and the green line to look back at history. All other lines never change once published.</p>
+
+    <h3>Day by day, the raw estimate jumps up and down; our filter moves far less</h3>
+    <p class="lede">The change from one day to the next, in percent. The raw estimate moves by about $SD_RAW a day, our filter by about $SD_FILTER, 2011 to July 2026. This chart follows the zoom of the chart above.</p>
+    <figure class="fig"><div id="ch-chg" class="chart mid"></div></figure>
   </div>
 </section>
 
@@ -403,7 +407,7 @@ var P0 = N - H.lag;   // first preliminary day of the two-sided line
   var twoFull = H.two.map(function(v,i){ return i<P0 ? v : null; });
   var twoPre = H.two.map(function(v,i){ return i>=P0-1 ? v : null; });
   var T = [
-    {x:D, y:H.raw, type:'scatter', mode:'markers', marker:{size:5, color:C.raw}, name:'raw estimate', hovertemplate:'%{y:,.0f} EH/s'},
+    {x:D, y:H.raw, type:'scatter', mode:'lines+markers', line:{color:C.raw, width:0.8}, marker:{size:5, color:C.raw}, name:'raw estimate', hovertemplate:'%{y:,.0f} EH/s'},
     {x:D, y:H.ma7, type:'scatter', mode:'lines', line:{color:C.ma7, width:1.6, dash:'dash'}, name:'7-day average', visible:'legendonly', hovertemplate:'%{y:,.0f} EH/s'},
     {x:D, y:H.ma3, type:'scatter', mode:'lines', line:{color:C.ma3, width:1.6, dash:'dot'}, name:'3-day average', hovertemplate:'%{y:,.0f} EH/s'},
     {x:D, y:twoFull, type:'scatter', mode:'lines', line:{color:C.two, width:1.8}, name:'two-sided version of our filter', legendgroup:'two', hovertemplate:'%{y:,.0f} EH/s'},
@@ -427,12 +431,29 @@ var P0 = N - H.lag;   // first preliminary day of the two-sided line
   head(L, 'Bitcoin network hashrate to '+H.asof_txt);
   L.annotations = [mark(30), {x:D[N-1], y:1, xref:'x', yref:'paper', xanchor:'right', yanchor:'top', showarrow:false, text:'two-sided version: last '+H.lag+' days not final', font:{size:11, color:C.two}}];
   Plotly.newPlot('ch-main', T, L, cfg('main'));
+
+  /* daily change, following the main chart's zoom */
+  var cr = function(a0, a1){ var m=0; for (var i=0;i<N;i++){ if (D[i]<a0 || D[i]>a1) continue; if (GR[i]!==null) m=Math.max(m,Math.abs(GR[i])); if (GP[i]!==null) m=Math.max(m,Math.abs(GP[i])); }
+    m = Math.ceil(m*1.08) || 30; return [-m, m]; };
+  var TC = [
+    {x:D, y:GR, type:'scatter', mode:'lines+markers', line:{color:C.raw, width:0.8}, marker:{size:4, color:C.raw}, name:'raw estimate', hovertemplate:'%{y:+.1f}%'},
+    {x:D, y:G3, type:'scatter', mode:'lines', line:{color:C.ma3, width:1.4, dash:'dot'}, name:'3-day average', visible:'legendonly', hovertemplate:'%{y:+.1f}%'},
+    {x:D, y:GP, type:'scatter', mode:'lines', line:{color:C.f, width:2.4}, name:'our filter', hovertemplate:'%{y:+.1f}%'}];
+  var LC = base();
+  LC.legend.itemclick = 'toggle'; LC.legend.itemdoubleclick = 'toggleothers';
+  LC.xaxis = Object.assign(LC.xaxis, {range:[D[i0], D[N-1]], type:'date', fixedrange:true});
+  LC.yaxis = Object.assign(LC.yaxis, {title:{text:'daily change, %', font:{size:11}}, range:cr(D[i0], D[N-1]), zeroline:true, zerolinecolor:'#9EA3AC', fixedrange:true});
+  head(LC, 'Daily change of the raw estimate and our filter, %');
+  LC.annotations = [mark()];
+  Plotly.newPlot('ch-chg', TC, LC, cfg('daily-change'));
+
   var el = document.getElementById('ch-main'), busy = false;
   el.on('plotly_relayout', function(ev){
     if (busy) return;
     var r = el.layout.xaxis.range; if (!r) return;
     var a0 = String(r[0]).slice(0,10), a1 = String(r[1]).slice(0,10);
     busy = true; Plotly.relayout(el, {'yaxis.range': yr(a0, a1)}).then(function(){ busy = false; });
+    Plotly.relayout('ch-chg', {'xaxis.range': [r[0], r[1]], 'yaxis.range': cr(a0, a1)});
   });
 })();
 
