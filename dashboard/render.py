@@ -285,7 +285,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <meta property="og:url" content="$SITE_URL">
 <meta property="og:title" content="Bitcoin Hashrate Filter: Removing the Daily Poisson Luck">
 <meta property="og:description" content="$DESC">
-<meta property="og:image" content="${SITE_URL}og-card.png?d=$AS_OF_ISO">
+<meta property="og:image" name="image" content="${SITE_URL}og-card.png?d=$AS_OF_ISO">
 <meta property="og:image:secure_url" content="${SITE_URL}og-card.png?d=$AS_OF_ISO">
 <meta property="og:image:type" content="image/png">
 <meta property="og:image:width" content="1200">
