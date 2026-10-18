@@ -77,6 +77,11 @@ def fmt_eh(x) -> str:
     return f"{x:,.0f}"
 
 
+def move(x) -> str:
+    """A change in words: "up 1.1%", "down 2.0%", "unchanged"."""
+    return "unchanged" if round(abs(x), 1) == 0 else f"{'up' if x > 0 else 'down'} {abs(x):.1f}%"
+
+
 def neg(x, dp=2) -> str:
     return f"{x:.{dp}f}".replace("-", "−")
 
@@ -132,6 +137,7 @@ def compute_stats(df: pd.DataFrame, meta: dict) -> tuple:
     st["n"] = int(last["n_blocks"])
     lam = expected_blocks(last["pure"], last["difficulty"])
     st["lam"] = lam
+    st["h144"] = 144 * last["difficulty"] * 2.0 ** 32 / 86400.0 / EH   # the rate that finds exactly 144 a day
     st["n_lo"], st["n_hi"] = int(poisson.ppf(0.025, lam)), int(poisson.ppf(0.975, lam))
     st["h_lo"], st["h_hi"] = int(poisson.ppf(0.025, lam / 24)), int(poisson.ppf(0.975, lam / 24))
     lp = np.log(d["pure"].values)
@@ -305,7 +311,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
       <div class="tile main">
         <div class="k">Our filter</div>
         <div class="v">$PURE <span class="u">EH/s</span></div>
-        <div class="s">$D1 on the day, $D7 over 7 days</div>
+        <div class="s">$D1_TXT from the day before, $D7_TXT from a week before</div>
       </div>
       <div class="tile">
         <div class="k">Raw estimate</div>
@@ -320,9 +326,10 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
       <div class="tile">
         <div class="k">Blocks found</div>
         <div class="v">$N <span class="u">blocks</span></div>
-        <div class="s">$LAM expected (target 144); luck alone gives $N_LO to $N_HI on 95% of days</div>
+        <div class="s">$LAM expected* (target 144); luck alone gives $N_LO to $N_HI on 95% of days</div>
       </div>
     </div>
+    <p class="note">* Bitcoin targets 144 blocks a day. At the current difficulty the network finds exactly 144 a day at $H144 EH/s. Our filter puts the hashrate at $PURE EH/s, so $LAM_1 blocks a day are expected, rounded to $LAM. Each difficulty adjustment, about every two weeks, sets the difficulty so that the hashrate of the past two weeks would find 144 a day. Updated daily.</p>
   </div>
 </section>
 
@@ -560,12 +567,12 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
         "RAW": fmt_eh(st["raw"]), "MA7": fmt_eh(st["ma7"]),
         "MA7_GAP": (f"{abs(100 * (st['ma7'] / st['pure'] - 1)):.1f}% " + ("below" if st["ma7"] < st["pure"] else "above")),
         "RAW_GAP": (f"{abs(100 * (st['raw'] / st['pure'] - 1)):.1f}% " + ("below" if st["raw"] < st["pure"] else "above")), "N": str(st["n"]), "N_LO": str(st["n_lo"]), "N_HI": str(st["n_hi"]),
-        "LAM": f"{st['lam']:.0f}",
+        "LAM": f"{st['lam']:.0f}", "LAM_1": f"{st['lam']:.1f}", "H144": fmt_eh(st["h144"]),
         "LAM_WHY": (f"At the current difficulty our filtered hashrate implies {st['lam']:.0f} blocks a day, about {st['lam'] / 24:.0f} an hour, "
                     + ("because the hashrate is slightly below the level the current difficulty was set for." if st["lam"] < 143.5 else
                        "because the hashrate is slightly above the level the current difficulty was set for." if st["lam"] > 144.5 else
                        "in line with the target.")), "LAM_H": f"{st['lam'] / 24:.1f}", "H_LO": str(st["h_lo"]), "H_HI": str(st["h_hi"]),
-        "D1": fmt_pct(st["d1"]), "D7": fmt_pct(st["d7"]), "G_BAND": f"{1.96 * PAPER['growth_unc']:.1f}%",
+        "D1": fmt_pct(st["d1"]), "D1_TXT": move(st["d1"]).capitalize(), "D7_TXT": move(st["d7"]), "D7": fmt_pct(st["d7"]), "G_BAND": f"{1.96 * PAPER['growth_unc']:.1f}%",
         "SD_RAW": PAPER["sd_raw"], "SD_FILTER": PAPER["sd_filter"], "NOISE_SHARE": PAPER["noise_share"],
         "LUCK_FULL": PAPER["luck_full"], "LUCK_2016": PAPER["luck_2016"],
         "SD_R": f"{st['sd']['raw']:.1f}%", "SD_3": f"{st['sd']['ma3']:.1f}%", "SD_7": f"{st['sd']['ma7']:.1f}%", "SD_F": f"{st['sd']['pure']:.1f}%", "SD_T": f"{st['sd']['pure_two_sided']:.1f}%",
