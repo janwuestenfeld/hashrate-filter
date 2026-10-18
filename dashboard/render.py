@@ -247,11 +247,16 @@ def share_images(d: pd.DataFrame, st: dict, out: Path, site_url: str) -> bool:
             fig.patch.set_facecolor("white")
             fig.text(0.05, 0.93, "Bitcoin's daily hashrate moves are mostly luck.", fontsize=20,
                      fontweight="bold", color="#0B0B0D", va="top")
-            fig.text(0.05, 0.86, "We built a filter that removes it, using the protocol's own rules.",
-                     fontsize=20, fontweight="bold", color="#F26B16", va="top")
-            ax = fig.add_axes([0.07, 0.15, 0.80, 0.55])
-            ax.scatter(w["date"], w["raw"] / EH, s=10, color="#AEB2BA", label="raw estimate", zorder=2)
-            ax.plot(w["date"], w["pure"] / EH, color="#F26B16", lw=3, label="our filter", zorder=3)
+            fig.text(0.05, 0.865, "We built a filter that removes it, using the protocol's own rules,\n"
+                     "without the fixed delay and false moves of a moving average.",
+                     fontsize=18, fontweight="bold", color="#F26B16", va="top", linespacing=1.3)
+            ax = fig.add_axes([0.07, 0.14, 0.80, 0.50])
+            ax.plot(w["date"], w["raw"] / EH, color="#AEB2BA", lw=0.8, marker="o", ms=3, label="raw estimate", zorder=2)
+            two = w["pure_two_sided"] / EH
+            k = len(w) - TWO_LAG   # the last TWO_LAG days are not final, as on the page
+            ax.plot(w["date"].iloc[:k], two.iloc[:k], color="#2C7A5B", lw=1.8, label="two-sided version", zorder=3)
+            ax.plot(w["date"].iloc[k - 1:], two.iloc[k - 1:], color="#2C7A5B", lw=1.8, ls=":", zorder=3)
+            ax.plot(w["date"], w["pure"] / EH, color="#F26B16", lw=3, label="our filter", zorder=4)
             ax.annotate(f"{st['pure']:,.0f} EH/s\n{fmt_date(st['as_of'])}", xy=(w["date"].iloc[-1], st["pure"]),
                         xytext=(10, 0), textcoords="offset points", va="center", fontsize=14,
                         color="#C2622A", fontweight="bold", annotation_clip=False)
@@ -260,7 +265,7 @@ def share_images(d: pd.DataFrame, st: dict, out: Path, site_url: str) -> bool:
             ax.tick_params(labelsize=12)
             for s in ["top", "right"]:
                 ax.spines[s].set_visible(False)
-            ax.legend(frameon=False, fontsize=12, loc="lower left", bbox_to_anchor=(0, 1.0), ncol=2, borderaxespad=0.2)
+            ax.legend(frameon=False, fontsize=12, loc="lower left", bbox_to_anchor=(0, 1.0), ncol=3, borderaxespad=0.2)
             fig.text(0.05, 0.035, f"{MARK}  ·  {short_url}", fontsize=12, color="#5C616B")
             fig.savefig(out / name, dpi=100)
             plt.close(fig)
@@ -313,7 +318,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
     <h1>Bitcoin Hashrate <span class="ac">Filter</span>: Removing the Daily Poisson Luck</h1>
     <div class="byline">by <a href="$JAN_URL" target="_blank" rel="noopener">Dr. Jan Wüstenfeld<span class="ext"> (homepage&nbsp;↗)</span></a> and <a href="$TEO_URL" target="_blank" rel="noopener">Teo Geldner<span class="ext"> (LinkedIn&nbsp;↗)</span></a> · <a href="$PAPER_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-paper">Paper<span class="ext"> (SSRN&nbsp;↗)</span></a> · <a href="$REPO_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-code">Code<span class="ext"> (GitHub&nbsp;↗)</span></a></div>
     <div class="freshness">Updated daily from public block data · last updated <span>$UPDATED</span> · figures below for <span>$AS_OF</span></div>
-    <div class="tagline">Bitcoin's daily hashrate moves are mostly luck. We built a filter that removes it, using the protocol's own rules, without the lag of a moving average.</div>
+    <div class="tagline">Bitcoin's daily hashrate moves are mostly luck. We built a filter that removes it, using the protocol's own rules, without the fixed delay and false moves of a moving average.</div>
     <p class="lede">Every daily hashrate figure comes from the number of blocks found that day and the difficulty. Blocks arrive at random, as a Poisson process, so the raw estimate moves by about $SD_RAW from one day to the next even when the hashrate stays the same. Moving averages damp these swings, but when a lucky day leaves their window the average falls although the hashrate did not change. We are the first to remove the luck without a smoothing window, using the size of Poisson luck at each day's block count and the times at which the day's blocks arrive. Since 2016 our filter removes $LUCK_2016 of this luck.</p>
     <div class="tiles four" id="live">
       <div class="tile main">
@@ -626,7 +631,7 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
     if hours is not None:
         (out / "data" / "lastday.json").write_text(json.dumps({"date": as_of_iso, "hours": hours}))
     (out / "data" / "README.txt").write_text(
-        "Bitcoin Hashrate Filter: the daily Bitcoin hashrate without the Poisson luck of block discovery\n"
+        "Bitcoin Hashrate Filter: Removing the Daily Poisson Luck\n"
         f"{site_url}\n\n"
         "daily.csv has one row per UTC day since 2011. Columns:\n"
         "  date                  the UTC day\n"
