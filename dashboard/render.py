@@ -320,7 +320,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
       <div class="tile">
         <div class="k">Blocks found</div>
         <div class="v">$N <span class="u">blocks</span></div>
-        <div class="s">$LAM expected; luck alone gives $N_LO to $N_HI on 95% of days</div>
+        <div class="s">$LAM expected (target 144); luck alone gives $N_LO to $N_HI on 95% of days</div>
       </div>
     </div>
   </div>
