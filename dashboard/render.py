@@ -331,7 +331,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
         <div class="s">$LAM expected* (target 144); luck alone gives $N_LO to $N_HI on 95% of days</div>
       </div>
     </div>
-    <p class="note">* Bitcoin targets 144 blocks a day. At the current difficulty the network finds exactly 144 a day at $H144 EH/s. Before the day's blocks were counted, our filter put the hashrate at $PURE_PREV EH/s, so $LAM blocks were expected.</p>
+    <p class="note">* Bitcoin targets 144 blocks a day. At the difficulty of $AS_OF the network finds exactly 144 a day at $H144 EH/s. On $PREV_DATE, the day before, our filter put the hashrate at $PURE_PREV EH/s, so $LAM blocks were expected for $AS_OF.</p>
   </div>
 </section>
 
@@ -569,7 +569,7 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
         "RAW": fmt_eh(st["raw"]), "MA7": fmt_eh(st["ma7"]),
         "MA7_GAP": (f"{abs(100 * (st['ma7'] / st['pure'] - 1)):.1f}% " + ("below" if st["ma7"] < st["pure"] else "above")),
         "RAW_GAP": (f"{abs(100 * (st['raw'] / st['pure'] - 1)):.1f}% " + ("below" if st["raw"] < st["pure"] else "above")), "N": str(st["n"]), "N_LO": str(st["n_lo"]), "N_HI": str(st["n_hi"]),
-        "LAM": f"{st['lam']:.0f}", "LAM_1": f"{st['lam']:.1f}", "H144": fmt_eh(st["h144"]), "PURE_PREV": fmt_eh(st["pure_prev"]),
+        "LAM": f"{st['lam']:.0f}", "LAM_1": f"{st['lam']:.1f}", "H144": fmt_eh(st["h144"]), "PURE_PREV": fmt_eh(st["pure_prev"]), "PREV_DATE": fmt_date(st["as_of"] - pd.Timedelta(days=1)),
         "LAM_WHY": (f"At the current difficulty our filtered hashrate implies {st['lam']:.0f} blocks a day, about {st['lam'] / 24:.0f} an hour, "
                     + ("because the hashrate is slightly below the level the current difficulty was set for." if st["lam"] < 143.5 else
                        "because the hashrate is slightly above the level the current difficulty was set for." if st["lam"] > 144.5 else
