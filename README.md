@@ -5,6 +5,8 @@ block data and removes most of the luck in block discovery. It implements
 the hashrate filter of Wüstenfeld and Geldner (2025) and runs on any daily
 block series with per-block timestamps and difficulty.
 
+Live dashboard, updated daily: https://janwuestenfeld.github.io/hashrate-filter/
+
 Bitcoin's hashrate has to be inferred from how many blocks the network
 finds, and block discovery is a lottery. Given the difficulty, a day's
 block count is Poisson with an expected value of 144, so luck alone moves a
@@ -268,6 +270,9 @@ day counts, so fixing the prior keeps earlier weights from moving through
 the map only; the null can still shift them slightly.
 
 ## Reference series and reproduction
+
+The current daily series is on the live dashboard,
+https://janwuestenfeld.github.io/hashrate-filter/ (data/daily.csv).
 
 `examples/data/` holds the paper's pure-filter and extended-filter series
 and the example output behind the figure above, so a run can be checked
