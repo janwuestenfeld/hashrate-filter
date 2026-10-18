@@ -47,6 +47,7 @@ import pandas as pd
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))  # the package, uninstalled
 
+import blockchair  # noqa: E402
 import daily_step  # noqa: E402
 import mempool  # noqa: E402
 import render  # noqa: E402
@@ -66,6 +67,13 @@ COLUMNS = [
 N_MIN, N_MAX = 40, 400            # historical range: 58 to 307 blocks/day
 D_RATIO_MIN, D_RATIO_MAX = 0.2, 5.0  # day-over-day mean difficulty
 GROWTH_MAX = 0.9                  # |raw daily growth| (historical max 0.59)
+
+# The two-sided estimate uses the following days by construction, so with
+# fewer than this many following days there is no two-sided estimate yet:
+# the line runs a week behind and those days are left empty (they fill in
+# as new days arrive). Published days of the paper's sample are exempt —
+# they carry the paper's published values.
+TWO_SIDED_LAG = 7
 
 
 class GateFailure(RuntimeError):
@@ -190,27 +198,40 @@ def gate_g3(df: pd.DataFrame, meta: dict) -> None:
     log(f"G3 ok: daily step replays the stored series exactly over {len(df) - i0 - 1} appended days")
 
 
-def gate_g6(df: pd.DataFrame) -> None:
+def gate_g6(df: pd.DataFrame, meta: dict) -> None:
     deltas = np.diff(df["date"].values).astype("timedelta64[D]").astype(int)
     if (deltas != 1).any():
         raise GateFailure("G6: dates are not consecutive calendar days")
-    if df[COLUMNS].isna().any().any():
-        raise GateFailure("G6: missing values in the stored series")
+    na = df[COLUMNS].isna()
+    # missing two-sided values are expected only in the trailing
+    # TWO_SIDED_LAG days after the paper's sample (the line runs a week
+    # behind); everything else must be complete
+    lag_mask = np.zeros(len(df), dtype=bool)
+    post = df["date"] > pd.Timestamp(meta["sample_end"])
+    lag_mask[np.flatnonzero(post.values)[-TWO_SIDED_LAG:] if post.any() else []] = True
+    allowed = pd.DataFrame(False, index=df.index, columns=df.columns)
+    allowed.loc[lag_mask, "pure_two_sided"] = True
+    if (na & ~allowed.values).any().any():
+        raise GateFailure("G6: missing values outside the two-sided trailing week")
     if ((df["weight"] < 0) | (df["weight"] > 1)).any():
         raise GateFailure("G6: weights outside [0, 1]")
-    if (df[["raw", "pure", "pure_two_sided", "ma3", "p_filt", "difficulty"]] <= 0).any().any():
+    if (df[["raw", "pure", "ma3", "p_filt", "difficulty"]] <= 0).any().any():
         raise GateFailure("G6: non-positive levels or variances")
+    if (df["pure_two_sided"].dropna() <= 0).any():
+        raise GateFailure("G6: non-positive two-sided levels")
     log("G6 ok: schema")
 
 
 # ---------------------------------------------------------------- update
-def append_new_days(df: pd.DataFrame, blocks: pd.DataFrame, meta: dict, scan_null: np.ndarray) -> tuple:
-    """Append every complete day after the stored end. Returns
+def append_new_days(
+    df: pd.DataFrame, blocks: pd.DataFrame, days: list, meta: dict, scan_null: np.ndarray
+) -> tuple:
+    """Append the given complete days after the stored end. Returns
     (df, n_added, two-sided tail shift)."""
+    end = pd.Timestamp(meta["sample_end"])
     prior = float(meta["prior"])
     q_quiet = float(meta["q_quiet"])
     last = df["date"].iloc[-1]
-    days = [day for day in mempool.complete_days(blocks) if day > last]
     if not days:
         log("no new complete days")
         return df, 0, 0.0
@@ -286,6 +307,15 @@ def append_new_days(df: pd.DataFrame, blocks: pd.DataFrame, meta: dict, scan_nul
         log(f"G5 ok: two-sided tail revised stored days by at most {shift:.2%}")
     new_two_sided = df["pure_two_sided"].values.copy()
     new_two_sided[a:] = revised
+
+    # The two-sided line runs a week behind: with fewer than TWO_SIDED_LAG
+    # following days there is no two-sided estimate yet, so the trailing
+    # days are left empty (they fill in as new days arrive). Published days
+    # of the paper's sample keep the paper's published values.
+    post = (df["date"] > end).values
+    if post.any():
+        blank = np.flatnonzero(post)[-TWO_SIDED_LAG:]
+        new_two_sided[blank] = np.nan
     df["pure_two_sided"] = new_two_sided
     return df, n_added, shift
 
@@ -305,22 +335,31 @@ def main() -> None:
     df = load_state(args)
 
     gate_g1(df, meta)
-    gate_g6(df)
+    gate_g6(df, meta)
 
-    if args.from_cache:
-        if not args.blocks_cache:
-            raise ValueError("--from-cache needs --blocks-cache")
-        blocks = mempool.fetch_blocks_back_to(
-            df["date"].iloc[-1] + pd.Timedelta(days=1), cache_path=args.blocks_cache, from_cache=True
-        )
+    tail_shift = 0.0
+
+    first_new = df["date"].iloc[-1] + pd.Timedelta(days=1)
+    today_utc = pd.Timestamp.utcnow().tz_localize(None).normalize()
+    last_day = today_utc - pd.Timedelta(days=1)  # yesterday, UTC
+    if first_new > last_day:
+        log("already up to date; re-rendering")
+        blocks, days, sources, fetched_utc = None, [], {}, ""
     else:
-        blocks = fetch_with_retry(df["date"].iloc[-1] + pd.Timedelta(days=1), args)
-
-    df, n_added, tail_shift = append_new_days(df, blocks, meta, scan_null)
+        if args.from_cache:
+            if not args.blocks_cache:
+                raise ValueError("--from-cache needs --blocks-cache")
+            blocks, days, sources, fetched_utc = read_cache(args.blocks_cache)
+        else:
+            blocks, days, sources, fetched_utc = gather_blocks(first_new, last_day, args)
+            if args.blocks_cache:
+                write_cache(args.blocks_cache, blocks, days, sources, fetched_utc)
+        df, n_added, tail_shift = append_new_days(df, blocks, days, meta, scan_null)
+        log("sources: " + (", ".join(f"{d.date()}={s}" for d, s in sources.items()) or "none"))
 
     gate_g2(scan_null, float(meta["prior"]))
     gate_g3(df, meta)
-    gate_g6(df)
+    gate_g6(df, meta)
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -329,23 +368,83 @@ def main() -> None:
         df, meta, out,
         site_url=SITE_URL, repo_root=REPO, css_src=SITE_DIR / "dashboard.css",
         tail_shift=tail_shift,
-        fetched_utc=blocks.attrs.get("fetched_utc", ""),
+        fetched_utc=fetched_utc,
     )
     log(f"wrote site to {out}")
     log(f"as of {df['date'].iloc[-1].date()}: filtered {df['pure'].iloc[-1] / 1e18:.1f} EH/s, "
         f"raw {df['raw'].iloc[-1] / 1e18:.1f} EH/s, weight {df['weight'].iloc[-1]:.3f}")
 
 
-def fetch_with_retry(first_day: pd.Timestamp, args) -> pd.DataFrame:
-    """Fetch blocks back to the day after the stored end; on any fetch
-    failure, abort (the deploy must not run on partial data)."""
-    log(f"fetching blocks back to {first_day.date()} (pace {args.pace}s)")
-    blocks = mempool.fetch_blocks_back_to(first_day, pace=args.pace, cache_path=args.blocks_cache)
-    log(
-        f"fetched {len(blocks)} blocks, tip {blocks.attrs['tip_height']}, "
-        f"complete through {blocks.attrs['tip_median_day'] - pd.Timedelta(days=1):%Y-%m-%d}"
-    )
-    return blocks
+# ---------------------------------------------------------------- sources
+def gather_blocks(first_day: pd.Timestamp, last_day: pd.Timestamp, args) -> tuple:
+    """Blocks for the median-time days first_day..last_day, and the list of
+    those days that are complete.
+
+    Source of record: Blockchair's daily dumps, the paper's source. Two
+    documented exceptions, both reading the same blockchain through
+    mempool.space's live API: a day whose dump is not available (yet), and
+    the after-midnight stragglers — blocks stamped in the first hours of
+    the following day whose median time still belongs to the day before,
+    which close the latest day (the following day's own dump is published
+    only when that day ends).
+    """
+    log(f"fetching Blockchair dumps {first_day.date()} -> {last_day.date()} (pace {args.pace}s)")
+    blocks, available = blockchair.fetch_blocks_for_days(first_day, last_day, pace=args.pace)
+    frames = [blocks] if len(blocks) else []
+    sources = {}
+    days = []
+    for day, ok in available.items():
+        if ok:
+            sources[day] = "blockchair"
+            days.append(day)
+        else:
+            log(f"  {day.date()}: dump unavailable, falling back to the live API")
+            frames.append(mempool.fetch_blocks_back_to(day, pace=args.pace))
+            sources[day] = "mempool"
+            days.append(day)
+
+    # the stragglers that close the latest day
+    try:
+        frames.append(
+            mempool.fetch_blocks_since(last_day + pd.Timedelta(days=1), pace=args.pace)
+        )
+        stragglers_ok = True
+    except mempool.FetchError as e:
+        log(f"  straggler fetch failed ({e}); closing one day earlier")
+        stragglers_ok = False
+        days = [d for d in days if d < last_day]
+
+    merged = pd.concat(frames, ignore_index=True)
+    merged = merged.drop_duplicates(subset="height").sort_values("height").reset_index(drop=True)
+    if merged[["time", "median_time", "difficulty"]].isna().any().any():
+        raise GateFailure("missing values in fetched blocks")
+    fetched_utc = pd.Timestamp.utcnow().strftime("%Y-%m-%d %H:%M UTC")
+    log(f"fetched {len(merged)} blocks; {len(days)} complete days to {days[-1].date() if days else 'n/a'}")
+    return merged, days, sources, fetched_utc
+
+
+def write_cache(path, blocks, days, sources, fetched_utc) -> None:
+    out = blocks.copy()
+    out["time"] = out["time"].astype(str)
+    out["median_time"] = out["median_time"].astype(str)
+    payload = {
+        "blocks": json.loads(out.to_json(orient="records")),
+        "days": [str(d.date()) for d in days],
+        "sources": {str(d.date()): s for d, s in sources.items()},
+        "fetched_utc": fetched_utc,
+    }
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(payload))
+
+
+def read_cache(path) -> tuple:
+    payload = json.loads(Path(path).read_text())
+    blocks = pd.DataFrame(payload["blocks"])
+    blocks["time"] = pd.to_datetime(blocks["time"])
+    blocks["median_time"] = pd.to_datetime(blocks["median_time"])
+    days = [pd.Timestamp(d) for d in payload["days"]]
+    sources = {pd.Timestamp(d): s for d, s in payload["sources"].items()}
+    return blocks, days, sources, payload["fetched_utc"]
 
 
 if __name__ == "__main__":

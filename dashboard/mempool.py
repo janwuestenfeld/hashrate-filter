@@ -132,3 +132,31 @@ def complete_days(blocks: pd.DataFrame) -> List[pd.Timestamp]:
     watermark = blocks.attrs["tip_median_day"]
     days = blocks["median_time"].dt.floor("D").unique()
     return sorted(day for day in days if day < watermark)
+
+
+def fetch_blocks_since(cutoff: pd.Timestamp, pace: float = 0.3) -> pd.DataFrame:
+    """Blocks with header time at or after `cutoff` (UTC, naive), walked
+    back from the tip. Used for the after-midnight stragglers whose median
+    time still belongs to the day before (they close the latest day)."""
+    cutoff = pd.Timestamp(cutoff)
+    h = tip_height(pace)
+    raw = []
+    while True:
+        page = _get(f"/blocks/{h}", pace)
+        if not page:
+            raise FetchError(f"empty page at height {h}")
+        for b in page:
+            if pd.Timestamp(b["timestamp"], unit="s") >= cutoff:
+                raw.append(b)
+        if pd.Timestamp(page[0]["timestamp"], unit="s") < cutoff:
+            break
+        h = page[-1]["height"] - 1
+    df = pd.DataFrame(
+        {
+            "height": [int(b["height"]) for b in raw],
+            "time": pd.to_datetime([int(b["timestamp"]) for b in raw], unit="s"),
+            "median_time": pd.to_datetime([int(b["mediantime"]) for b in raw], unit="s"),
+            "difficulty": [float(b["difficulty"]) for b in raw],
+        }
+    )
+    return df.drop_duplicates(subset="height").sort_values("height").reset_index(drop=True)

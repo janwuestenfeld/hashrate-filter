@@ -35,9 +35,15 @@ Pages artifact. Nothing is committed by the workflow.
 - `daily_step.py` — the one-day steps (weight, filter update, two-sided
   tail), written from the model in the repository README with no private
   imports.
-- `mempool.py` — the paced block fetcher. A day is complete once the chain
-  tip's median time has passed into the next day; median time never
-  decreases along the chain.
+- `blockchair.py` — the fetcher for Blockchair's daily dumps
+  (`gz.blockchair.com/bitcoin/blocks/`), the paper's source. New days come
+  from the same dumps the paper's history was built from.
+- `mempool.py` — the mempool.space live API fetcher, used in two
+  documented cases only: a day whose dump is not available (yet), and the
+  after-midnight stragglers whose median time still belongs to the day
+  before (they close the latest day; the following day's own dump is
+  published only when that day ends). Both read the same blockchain; the
+  build log records which source served each day.
 - `build_dashboard.py` — the daily build: state, append, gates, render.
 - `render.py`, `site/dashboard.css` — the page. Design language adapted
   from the Bitcoin Market Structure Dashboard
@@ -57,8 +63,11 @@ before the deploy steps and nothing wrong is published.
 
 ## The two-sided line
 
-By construction the two-sided version uses the following days, so its last
-week is revised as new days arrive. It is the only line on the page whose
-past moves: the raw estimate, the one-sided filter and the moving average
-are never revised once a day is published. The page says so, next to the
-line itself.
+By construction the two-sided version uses the following days, so it runs
+a week behind: days with fewer than seven following days are left empty in
+the published CSV (they fill in as new days arrive), and its last days
+keep being revised. It is the only line on the page whose past moves: the
+raw estimate, the one-sided filter and the moving average are never
+revised once a day is published. Published days of the paper's sample are
+exempt from the empty-tail rule — they carry the paper's published values.
+The page says all of this, next to the line itself.
