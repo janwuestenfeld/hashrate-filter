@@ -135,7 +135,9 @@ def compute_stats(df: pd.DataFrame, meta: dict) -> tuple:
     st["raw"] = last["raw"] / EH
     st["ma7"] = last["ma7"] / EH
     st["n"] = int(last["n_blocks"])
-    lam = expected_blocks(last["pure"], last["difficulty"])
+    # the expectation before the day's blocks are counted: the previous day's filter at the day's difficulty
+    st["pure_prev"] = d["pure"].iloc[-2] / EH
+    lam = expected_blocks(d["pure"].iloc[-2], last["difficulty"])
     st["lam"] = lam
     st["h144"] = 144 * last["difficulty"] * 2.0 ** 32 / 86400.0 / EH   # the rate that finds exactly 144 a day
     st["n_lo"], st["n_hi"] = int(poisson.ppf(0.025, lam)), int(poisson.ppf(0.975, lam))
@@ -329,7 +331,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
         <div class="s">$LAM expected* (target 144); luck alone gives $N_LO to $N_HI on 95% of days</div>
       </div>
     </div>
-    <p class="note">* Bitcoin targets 144 blocks a day. At the current difficulty the network finds exactly 144 a day at $H144 EH/s. Our filter puts the hashrate at $PURE EH/s, so $LAM_1 blocks a day are expected, rounded to $LAM. Each difficulty adjustment, about every two weeks, sets the difficulty so that the hashrate of the past two weeks would find 144 a day. Updated daily.</p>
+    <p class="note">* Bitcoin targets 144 blocks a day. At the current difficulty the network finds exactly 144 a day at $H144 EH/s. Before the day's blocks are counted, our filter put the hashrate at $PURE_PREV EH/s, so $LAM_1 blocks were expected, rounded to $LAM. The gap to the blocks found is the day's luck plus any real change in hashrate that day. Each difficulty adjustment, about every two weeks, sets the difficulty so that the hashrate of the past two weeks would find 144 a day. Updated daily.</p>
   </div>
 </section>
 
@@ -567,7 +569,7 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
         "RAW": fmt_eh(st["raw"]), "MA7": fmt_eh(st["ma7"]),
         "MA7_GAP": (f"{abs(100 * (st['ma7'] / st['pure'] - 1)):.1f}% " + ("below" if st["ma7"] < st["pure"] else "above")),
         "RAW_GAP": (f"{abs(100 * (st['raw'] / st['pure'] - 1)):.1f}% " + ("below" if st["raw"] < st["pure"] else "above")), "N": str(st["n"]), "N_LO": str(st["n_lo"]), "N_HI": str(st["n_hi"]),
-        "LAM": f"{st['lam']:.0f}", "LAM_1": f"{st['lam']:.1f}", "H144": fmt_eh(st["h144"]),
+        "LAM": f"{st['lam']:.0f}", "LAM_1": f"{st['lam']:.1f}", "H144": fmt_eh(st["h144"]), "PURE_PREV": fmt_eh(st["pure_prev"]),
         "LAM_WHY": (f"At the current difficulty our filtered hashrate implies {st['lam']:.0f} blocks a day, about {st['lam'] / 24:.0f} an hour, "
                     + ("because the hashrate is slightly below the level the current difficulty was set for." if st["lam"] < 143.5 else
                        "because the hashrate is slightly above the level the current difficulty was set for." if st["lam"] > 144.5 else
