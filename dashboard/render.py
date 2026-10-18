@@ -128,6 +128,7 @@ def compute_stats(df: pd.DataFrame, meta: dict) -> tuple:
     b = 1.96 * np.sqrt(last["p_filt"])
     st["band_lo"], st["band_hi"] = st["pure"] * np.exp(-b), st["pure"] * np.exp(b)
     st["raw"] = last["raw"] / EH
+    st["ma7"] = last["ma7"] / EH
     st["n"] = int(last["n_blocks"])
     lam = expected_blocks(last["pure"], last["difficulty"])
     st["lam"] = lam
@@ -258,16 +259,16 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bitcoin Hashrate Filter: the daily hashrate without the block luck</title>
+<title>Bitcoin Hashrate Filter: Removing the Daily Poisson Luck</title>
 <meta name="description" content="$DESC">
 <link rel="canonical" href="$SITE_URL">
 <meta property="og:type" content="website">
 <meta property="og:url" content="$SITE_URL">
-<meta property="og:title" content="Bitcoin Hashrate Filter">
+<meta property="og:title" content="Bitcoin Hashrate Filter: Removing the Daily Poisson Luck">
 <meta property="og:description" content="$DESC">
 <meta property="og:image" content="${SITE_URL}og-card.png">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Bitcoin Hashrate Filter">
+<meta name="twitter:title" content="Bitcoin Hashrate Filter: Removing the Daily Poisson Luck">
 <meta name="twitter:description" content="$DESC">
 <meta name="twitter:image" content="${SITE_URL}og-card.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -295,20 +296,31 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <main>
 <section class="hero">
   <div class="wrap">
-    <h1>Bitcoin Hashrate <span class="ac">Filter</span></h1>
+    <h1>Bitcoin Hashrate <span class="ac">Filter</span>: Removing the Daily Poisson Luck</h1>
     <div class="byline">by <a href="$JAN_URL" target="_blank" rel="noopener">Dr. Jan Wüstenfeld<span class="ext"> (homepage&nbsp;↗)</span></a> and <a href="$TEO_URL" target="_blank" rel="noopener">Teo Geldner<span class="ext"> (LinkedIn&nbsp;↗)</span></a> · <a href="$PAPER_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-paper">Paper<span class="ext"> (SSRN&nbsp;↗)</span></a> · <a href="$REPO_URL" target="_blank" rel="noopener" data-goatcounter-click="byline-code">Code<span class="ext"> (GitHub&nbsp;↗)</span></a></div>
-    <div class="freshness">Updated daily from public block data · last updated <span>$UPDATED</span></div>
+    <div class="freshness">Updated daily from public block data · last updated <span>$UPDATED</span> · figures below for <span>$AS_OF</span></div>
     <div class="tagline">Bitcoin's daily hashrate moves are mostly luck. We built a filter that removes it, using the protocol's own rules, without the lag of a moving average.</div>
     <p class="lede">Every daily hashrate figure comes from the number of blocks found that day and the difficulty. Blocks arrive at random, as a Poisson process, so the raw estimate moves by about $SD_RAW from one day to the next even when the hashrate stays the same. Moving averages damp these swings, but when a lucky day leaves their window the average falls although the hashrate did not change. We are the first to remove the luck without a smoothing window, using the size of Poisson luck at each day's block count and the times at which the day's blocks arrive. Since 2016 our filter removes $LUCK_2016 of this luck.</p>
-    <div class="tiles two" id="live">
+    <div class="tiles four" id="live">
       <div class="tile main">
-        <div class="k">Our filter, $AS_OF</div>
+        <div class="k">Our filter</div>
         <div class="v">$PURE <span class="u">EH/s</span></div>
+        <div class="s">$D1 on the day, $D7 over 7 days</div>
       </div>
       <div class="tile">
-        <div class="k">Raw estimate, same day</div>
+        <div class="k">Raw estimate</div>
         <div class="v">$RAW <span class="u">EH/s</span></div>
-        <div class="s">from $N blocks</div>
+        <div class="s">$RAW_GAP our filter</div>
+      </div>
+      <div class="tile">
+        <div class="k">7-day average</div>
+        <div class="v">$MA7 <span class="u">EH/s</span></div>
+        <div class="s">$MA7_GAP our filter</div>
+      </div>
+      <div class="tile">
+        <div class="k">Blocks found</div>
+        <div class="v">$N <span class="u">blocks</span></div>
+        <div class="s">$LAM expected; luck alone gives $N_LO to $N_HI on 95% of days</div>
       </div>
     </div>
   </div>
@@ -545,7 +557,8 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
         "SITE_URL": site_url, "PAPER_URL": PAPER_URL, "REPO_URL": REPO_URL, "JAN_URL": JAN_URL, "TEO_URL": TEO_URL,
         "AS_OF": fmt_date(st["as_of"]), "AS_OF_ISO": as_of_iso, "LAG": str(TWO_LAG),
         "PURE": fmt_eh(st["pure"]), "BAND_LO": f"{st['band_lo']:,.0f}", "BAND_HI": f"{st['band_hi']:,.0f}",
-        "RAW": fmt_eh(st["raw"]),
+        "RAW": fmt_eh(st["raw"]), "MA7": fmt_eh(st["ma7"]),
+        "MA7_GAP": (f"{abs(100 * (st['ma7'] / st['pure'] - 1)):.1f}% " + ("below" if st["ma7"] < st["pure"] else "above")),
         "RAW_GAP": (f"{abs(100 * (st['raw'] / st['pure'] - 1)):.1f}% " + ("below" if st["raw"] < st["pure"] else "above")), "N": str(st["n"]), "N_LO": str(st["n_lo"]), "N_HI": str(st["n_hi"]),
         "LAM": f"{st['lam']:.0f}",
         "LAM_WHY": (f"At the current difficulty our filtered hashrate implies {st['lam']:.0f} blocks a day, about {st['lam'] / 24:.0f} an hour, "
