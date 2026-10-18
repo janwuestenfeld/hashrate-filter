@@ -286,6 +286,12 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <meta property="og:title" content="Bitcoin Hashrate Filter: Removing the Daily Poisson Luck">
 <meta property="og:description" content="$DESC">
 <meta property="og:image" content="${SITE_URL}og-card.png">
+<meta property="og:image:secure_url" content="${SITE_URL}og-card.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="Bitcoin hashrate: raw estimate, our filter and its two-sided version over the last six months">
+<meta property="og:site_name" content="Bitcoin Hashrate Filter">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Bitcoin Hashrate Filter: Removing the Daily Poisson Luck">
 <meta name="twitter:description" content="$DESC">
