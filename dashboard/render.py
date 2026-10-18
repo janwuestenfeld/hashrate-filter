@@ -197,6 +197,7 @@ def compute_stats(df: pd.DataFrame, meta: dict) -> tuple:
     st["ban_half_f"] = after.index[after["pure"] <= half][0]
     st["ban_half_7"] = after.index[after["ma7"] <= half][0]
     st["ban_half_lag"] = int((st["ban_half_7"] - st["ban_half_f"]).days)
+    st["ban_half_t"] = after.index[after["pure_two_sided"] <= half][0]
     gap = (after["ma7"] - after["pure"]).loc[:st["ban_lo_d"]]
     st["ban_gap_d"] = gap.idxmax()
     st["ban_gap_7"], st["ban_gap_f"] = after["ma7"].loc[st["ban_gap_d"]] / EH, after["pure"].loc[st["ban_gap_d"]] / EH
@@ -348,7 +349,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
     <p class="note">The green line is the two-sided version of our filter. It also uses the following seven days, so its last seven days (shaded, dotted) are not final and change as new days come in. Use the orange line for real-time work and the green line to look back at history. All other lines never change once published.</p>
 
     <h3>Day by day, the raw estimate jumps up and down; our filter moves far less</h3>
-    <p class="lede">The change from one day to the next, in percent. The raw estimate moves by about $SD_RAW a day, our filter by about $SD_FILTER, 2011 to July 2026. This chart follows the zoom of the chart above.</p>
+    <p class="lede">The change from one day to the next, in percent: grey the raw estimate, orange our filter, green its two-sided version. The raw estimate moves by about $SD_RAW a day, our filter by about $SD_FILTER, 2011 to July 2026. This chart follows the zoom of the chart above.</p>
     <figure class="fig"><div id="ch-chg" class="chart mid"></div></figure>
   </div>
 </section>
@@ -356,17 +357,17 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 <section class="sec alt" id="evidence">
   <div class="wrap">
     <h2>Most of the raw estimate's daily movement is luck</h2>
-    <div class="nums"><div><span class="v grey">$NOISE_SHARE</span><span class="k">of the variation in the raw estimate's daily changes is luck, 2011 to July 2026</span></div><div><span class="v ac">$LUCK_FULL</span><span class="k">of that luck our filter removes, 2011 to July 2026 ($LUCK_2016 since 2016)</span></div></div>
-    <p class="lede">In every year the raw estimate moves close to what Poisson luck alone produces (dashed line), about $SD_RAW a day. Our filter (orange bars) moves about $SD_FILTER a day, 2011 to July 2026.</p>
+    <div class="nums"><div><span class="v grey">$NOISE_SHARE</span><span class="k">of the variation in the raw estimate's daily changes is luck, 2011 to July 2026</span></div><div><span class="v ac">$LUCK_FULL</span><span class="k">of that luck our filter removes, 2011 to July 2026 ($LUCK_2016 since 2016)</span></div><div><span class="v tw">$P_TWO</span><span class="k">of that luck the two-sided version removes, 2011 to July 2026</span></div></div>
+    <p class="lede">In every year the raw estimate moves close to what Poisson luck alone produces (dashed line), about $SD_RAW a day. Our filter (orange bars) moves about $SD_FILTER a day, 2011 to July 2026, and its two-sided version (green bars) less still.</p>
     <figure class="fig"><div id="ch-years" class="chart mid"></div></figure>
 
     <h2 class="gap">In the 2021 China mining ban our filter showed half of the fall $BAN_HALF_LAG days before the 7-day average</h2>
-    <p class="lede">Our filter showed half of the fall on $BAN_HALF_F and the 7-day average on $BAN_HALF_7, $BAN_HALF_LAG days later. In May and June 2021 China banned bitcoin mining, and our filter fell by more than half, from $BAN_HI EH/s on $BAN_HI_D to $BAN_LO EH/s on $BAN_LO_D. On $BAN_GAP_D the 7-day average was still at $BAN_GAP_7 EH/s, against $BAN_GAP_F EH/s in our filter, because the average still included the six days before, when the hashrate was higher. On 9 Jun 2021 the day's block times pointed to a real change, so our filter moved $BAN_FLAG_K of the way to that day's raw estimate instead of the usual $GAIN.</p>
+    <p class="lede">Our filter showed half of the fall on $BAN_HALF_F and the 7-day average on $BAN_HALF_7, $BAN_HALF_LAG days later. The two-sided version, looking back with the following week, puts it on $BAN_HALF_T. In May and June 2021 China banned bitcoin mining, and our filter fell by more than half, from $BAN_HI EH/s on $BAN_HI_D to $BAN_LO EH/s on $BAN_LO_D. On $BAN_GAP_D the 7-day average was still at $BAN_GAP_7 EH/s, against $BAN_GAP_F EH/s in our filter, because the average still included the six days before, when the hashrate was higher. On 9 Jun 2021 the day's block times pointed to a real change, so our filter moved $BAN_FLAG_K of the way to that day's raw estimate instead of the usual $GAIN.</p>
     <figure class="fig"><div id="ch-ban" class="chart mid"></div></figure>
 
     <h2 class="gap">How our filter works</h2>
     <p class="lede">Bitcoin's protocol adjusts the difficulty every 2,016 blocks, about every two weeks, so that the network finds on average 144 blocks a day. Because blocks arrive as a Poisson process, the chance variation of a day's count follows from the expected count itself. On a 144-block day its standard deviation is the square root of 144, which is 12 blocks or 8.3%. A change from one day to the next combines the luck of two days, which gives the $SD_RAW of the raw estimate. Each day our filter moves part of the way from its previous estimate toward the day's raw estimate. When the day's blocks come faster in one part of the day than in the other, which points to a real change in hashrate, our filter moves further.</p>
-    <p class="lede">The two-sided version of our filter also uses the following seven days and removes $P_TWO of the luck, 2011 to July 2026. It is for looking back at history. It cannot be used in real time, and it should not feed a model of how miners respond to price and fees, because each of its values already contains the following week.</p>
+    <p class="lede">The two-sided version of our filter also uses the following seven days and removes $P_TWO of the luck, 2011 to July 2026. Use it to study the past. For real-time work, and as an input to models of how miners respond to price and fees, use our filter, which uses only the blocks up to each day.</p>
   </div>
 </section>
 
@@ -424,7 +425,7 @@ var head = function(L, title, short){
 var cfg = function(name){ return {responsive:true, displaylogo:false, displayModeBar:narrow?false:'hover', modeBarButtonsToRemove:['lasso2d','select2d','autoScale2d','toggleSpikelines'],
   toImageButtonOptions:{format:'png', filename:'hashrate-filter_'+name+'_'+H.asof, scale:2, width:1200, height:675}}; };
 var g = function(a){ var o=[null]; for(var i=1;i<a.length;i++) o.push(a[i]&&a[i-1] ? 100*Math.log(a[i]/a[i-1]) : null); return o; };
-var GR = g(H.raw), GP = g(H.pure), G3 = g(H.ma3), G7 = g(H.ma7);
+var GR = g(H.raw), GP = g(H.pure), G3 = g(H.ma3), G7 = g(H.ma7), GT2 = g(H.two);
 var DAY = 864e5, t = function(i){ return new Date(D[i]+'T00:00:00Z').getTime(); }, iso = function(ms){ return new Date(ms).toISOString().slice(0,10); };
 var P0 = N - H.lag;   // first preliminary day of the two-sided line
 
@@ -464,12 +465,14 @@ var P0 = N - H.lag;   // first preliminary day of the two-sided line
   var TC = [
     {x:D, y:GR, type:'scatter', mode:'lines+markers', line:{color:C.raw, width:0.8}, marker:{size:4, color:C.raw}, name:'raw estimate', hovertemplate:'%{y:+.1f}%'},
     {x:D, y:G3, type:'scatter', mode:'lines', line:{color:C.ma3, width:1.4, dash:'dot'}, name:'3-day average', visible:'legendonly', hovertemplate:'%{y:+.1f}%'},
+    {x:D, y:GT2.map(function(v,i){ return i<P0 ? v : null; }), type:'scatter', mode:'lines', line:{color:C.two, width:1.6}, name:'two-sided version of our filter', legendgroup:'two', hovertemplate:'%{y:+.1f}%'},
+    {x:D, y:GT2.map(function(v,i){ return i>=P0-1 ? v : null; }), type:'scatter', mode:'lines', line:{color:C.two, width:1.6, dash:'dot'}, name:'two-sided, not final', legendgroup:'two', showlegend:false, hovertemplate:'%{y:+.1f}%, not final yet'},
     {x:D, y:GP, type:'scatter', mode:'lines', line:{color:C.f, width:2.4}, name:'our filter', hovertemplate:'%{y:+.1f}%'}];
   var LC = base();
   LC.legend.itemclick = 'toggle'; LC.legend.itemdoubleclick = 'toggleothers';
   LC.xaxis = Object.assign(LC.xaxis, {range:[D[i0], D[N-1]], type:'date', fixedrange:true});
   LC.yaxis = Object.assign(LC.yaxis, {title:{text:'daily change, %', font:{size:11}}, range:cr(D[i0], D[N-1]), zeroline:true, zerolinecolor:'#9EA3AC', fixedrange:true});
-  head(LC, 'Daily change of the raw estimate and our filter, %');
+  head(LC, 'Daily change of the raw estimate, our filter and its two-sided version, %');
   LC.annotations = [mark()];
   Plotly.newPlot('ch-chg', TC, LC, cfg('daily-change'));
 
@@ -495,10 +498,11 @@ var P0 = N - H.lag;   // first preliminary day of the two-sided line
   var luck=100*Math.sqrt(2/144);
   var T=[{x:yrs, y:sr, type:'bar', name:'raw estimate', marker:{color:C.raw}, hovertemplate:'%{y:.1f}%'},
          {x:yrs, y:sp, type:'bar', name:'our filter', marker:{color:C.f}, hovertemplate:'%{y:.1f}%'},
+         {x:yrs, y:stw, type:'bar', name:'two-sided version', marker:{color:C.two}, hovertemplate:'%{y:.1f}%'},
          {x:[yrs[0], yrs[yrs.length-1]], y:[luck,luck], type:'scatter', mode:'lines', line:{color:C.ink, width:1.4, dash:'dash'}, name:'luck alone (Poisson)', hoverinfo:'skip'}];
   var L=base(); L.barmode='group'; L.hovermode='x unified';
   L.yaxis.title={text:'typical daily change, %', font:{size:11}}; L.yaxis.rangemode='tozero';
-  head(L, 'Typical daily change by year: raw estimate, our filter and luck alone');
+  head(L, 'Typical daily change by year: raw estimate, our filter, its two-sided version and luck alone');
   L.annotations=[mark()];
   Plotly.newPlot('ch-years', T, L, cfg('daily-move-by-year'));
 })();
@@ -509,9 +513,10 @@ var P0 = N - H.lag;   // first preliminary day of the two-sided line
   var s=function(arr){ return arr.slice(a,z+1); }, x=s(D);
   var T=[{x:x, y:s(H.raw), type:'scatter', mode:'markers', marker:{size:6, color:C.raw}, name:'raw estimate', hovertemplate:'%{y:,.0f} EH/s'},
          {x:x, y:s(H.ma7), type:'scatter', mode:'lines', line:{color:C.ma7, width:2, dash:'dash'}, name:'7-day average', hovertemplate:'%{y:,.0f} EH/s'},
+         {x:x, y:s(H.two), type:'scatter', mode:'lines', line:{color:C.two, width:2}, name:'two-sided version', hovertemplate:'%{y:,.0f} EH/s'},
          {x:x, y:s(H.pure), type:'scatter', mode:'lines', line:{color:C.f, width:3}, name:'our filter', hovertemplate:'%{y:,.0f} EH/s'}];
   var L=base(); L.hovermode='x unified'; L.yaxis.title={text:'EH/s', font:{size:11}}; L.yaxis.range=[50,200];
-  head(L, 'Hashrate in the 2021 China mining ban: our filter, 7-day average and raw estimate');
+  head(L, 'Hashrate in the 2021 China mining ban: our filter, its two-sided version, 7-day average and raw estimate');
   L.annotations=[mark()]; L.shapes=[];
   L.shapes.push({type:'line', xref:'paper', yref:'y', x0:0, x1:1, y0:H.ban.half, y1:H.ban.half, line:{color:C.dim, width:1, dash:'dot'}});
   L.annotations.push({x:1, y:H.ban.half, xref:'paper', yref:'y', xanchor:'right', yanchor:'top', showarrow:false, text:'half of the fall, '+Math.round(H.ban.half)+' EH/s', font:{size:11, color:C.dim}});
@@ -594,7 +599,7 @@ def write_site(df, meta, out, *, site_url, repo_root, css_src, tail_shift, fetch
         "BAN_HI": f"{st['ban_hi']:.0f}", "BAN_HI_D": fmt_date(st["ban_hi_d"]),
         "BAN_LO": f"{st['ban_lo']:.0f}", "BAN_LO_D": fmt_date(st["ban_lo_d"]),
         "BAN_LO7_D": fmt_date(st["ban_lo7_d"]), "BAN_LAG7": str(st["ban_lag7"]), "BAN_HALF_F": fmt_date(st["ban_half_f"]), "BAN_HALF_7": fmt_date(st["ban_half_7"]),
-        "BAN_HALF_LAG": str(st["ban_half_lag"]), "BAN_GAP_D": fmt_date(st["ban_gap_d"]), "BAN_GAP_7": f"{st['ban_gap_7']:.0f}", "BAN_GAP_F": f"{st['ban_gap_f']:.0f}", "BAN_FLAG_K": f"{100 * st['ban_flag_k']:.0f}%",
+        "BAN_HALF_LAG": str(st["ban_half_lag"]), "BAN_HALF_T": fmt_date(st["ban_half_t"]), "BAN_GAP_D": fmt_date(st["ban_gap_d"]), "BAN_GAP_7": f"{st['ban_gap_7']:.0f}", "BAN_GAP_F": f"{st['ban_gap_f']:.0f}", "BAN_FLAG_K": f"{100 * st['ban_flag_k']:.0f}%",
         "P_BAN": PAPER["ban"], "P_GAIN": PAPER["gain_day"], "P_WEEK": PAPER["gain_week"],
         "P_COV": PAPER["cov_quiet"], "P_COV1": PAPER["cov_jump1"], "P_COV2": PAPER["cov_jump2"], "P_TWO": PAPER["luck_two"],
         "Q_QUIET": f"{float(meta['q_quiet']):.2e}", "Q_JUMP": f"{Q_JUMP:.2e}",

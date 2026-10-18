@@ -80,7 +80,7 @@ table.cmp tr.f td{color:var(--ink);font-weight:600}
 table.cmp tr.f td:first-child{color:var(--f-dark)}
 
 /* big numbers */
-.nums{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:22px}
+.nums{display:grid;grid-template-columns:1fr 1fr 1fr;gap:28px;margin-top:22px}
 .nums div{display:flex;flex-direction:column}
 .nums .v{font-family:var(--mono);font-weight:600;font-size:44px;line-height:1.1;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 .nums .v.grey{color:var(--ink)}.nums .v.ac{color:var(--f)}.nums .v.tw{color:var(--two)}
