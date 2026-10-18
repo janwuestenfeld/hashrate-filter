@@ -1,0 +1,54 @@
+{
+  "schema": 1,
+  "sample_start": "2011-01-01",
+  "sample_end": "2026-07-15",
+  "days": 5675,
+  "prior": 0.014160987808690215,
+  "q_quiet": 0.0007811432711554335,
+  "q_quiet_paper": 0.000781,
+  "reps": 50000,
+  "seed": 123,
+  "generated_by": "dashboard/build_history.py",
+  "generated_utc": "2026-10-18 10:17 UTC",
+  "versions": {
+    "numpy": "2.1.3",
+    "pandas": "2.2.3"
+  },
+  "pure_source": "example",
+  "verification": {
+    "stored_pure_vs_reference": {
+      "median": 4.862228516699929e-05,
+      "mean": 0.00020236022923014808,
+      "max": 0.011478266233460488,
+      "max_date": "2026-07-15"
+    },
+    "rebuilt_pure_vs_reference": {
+      "median": 4.862228516699929e-05,
+      "mean": 0.00020236022923014808,
+      "max": 0.011478266233460488,
+      "max_date": "2026-07-15"
+    },
+    "rebuilt_pure_vs_example": {
+      "median": 0.0,
+      "mean": 0.0,
+      "max": 0.0,
+      "max_date": "2011-01-01"
+    },
+    "rebuilt_two_sided_vs_example": {
+      "median": 0.0,
+      "mean": 0.0,
+      "max": 0.0,
+      "max_date": "2011-01-01"
+    },
+    "rebuilt_raw_vs_example": {
+      "median": 0.0,
+      "mean": 2.566718252525472e-17,
+      "max": 7.105427357601002e-15,
+      "max_date": "2013-07-15"
+    },
+    "scan_null_p_scan_max_diff": 0.0,
+    "one_day_weight_max_diff": 4.51166881632048e-14,
+    "one_day_filter_step_max_diff": 0.0,
+    "tail_resmooth_max_diff": 0.0
+  }
+}

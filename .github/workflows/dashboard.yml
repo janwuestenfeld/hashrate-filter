@@ -1,0 +1,81 @@
+name: Daily hashrate dashboard
+
+# Rebuilds the live dashboard once a day from public block data and publishes
+# it via GitHub Pages' artifact deployment. Nothing is committed: the
+# published CSV (data/daily.csv in the deployed artifact) is both the
+# download and the next run's state.
+#
+# GATE-FAIL-BLOCKS-PUBLISH GUARANTEE
+# ----------------------------------
+# dashboard/build_dashboard.py re-checks the whole construction on every run:
+# the published history equals the paper's series to its stated deviation
+# (G1), the one-day weight step reproduces the stored weights on the shipped
+# sample blocks (G2), the daily filter step replays the stored series exactly
+# (G3), new rows pass per-day sanity bounds (G4), the two-sided tail revision
+# stays within its plausible envelope (G5), and the schema is sound (G6). On
+# any failure the script exits nonzero, this job fails BEFORE the deploy
+# steps, and nothing wrong is ever published; the failed run is the alert.
+
+on:
+  schedule:
+    # 04:15 UTC: the previous UTC day is complete by then (a day closes once
+    # the chain tip's median time passes midnight; median time never
+    # decreases along the chain).
+    - cron: '15 4 * * *'
+    # Fallback ticks: GitHub cron is best-effort and occasionally skips. The
+    # build is idempotent, so extra runs cost nothing.
+    - cron: '15 7 * * *'
+    - cron: '15 12 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: hashrate-dashboard
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Install the package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      # If a gate fails (source drift, bad data, code regression), the job
+      # stops here: no deploy.
+      - name: Build the dashboard (gates block publish on failure)
+        run: |
+          python dashboard/build_dashboard.py --out dashboard/build --pace 0.2
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dashboard/build
+
+      # Pages transiently refuses deployments; tolerate one failure and
+      # retry after a 3-minute pause.
+      - id: deployment
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+      - name: Pause before deploy retry
+        if: steps.deployment.outcome == 'failure'
+        run: sleep 180
+      - id: deployment-retry
+        if: steps.deployment.outcome == 'failure'
+        uses: actions/deploy-pages@v4
