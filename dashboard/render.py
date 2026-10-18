@@ -331,7 +331,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
         <div class="s">$LAM expected* (target 144); luck alone gives $N_LO to $N_HI on 95% of days</div>
       </div>
     </div>
-    <p class="note">* Bitcoin targets 144 blocks a day. At the current difficulty the network finds exactly 144 a day at $H144 EH/s. Before the day's blocks are counted, our filter put the hashrate at $PURE_PREV EH/s, so $LAM_1 blocks were expected, rounded to $LAM. The gap to the blocks found is the day's luck plus any real change in hashrate that day. Each difficulty adjustment, about every two weeks, sets the difficulty so that the hashrate of the past two weeks would find 144 a day. Updated daily.</p>
+    <p class="note">* Bitcoin targets 144 blocks a day. At the current difficulty the network finds exactly 144 a day at $H144 EH/s. Before the day's blocks were counted, our filter put the hashrate at $PURE_PREV EH/s, so $LAM blocks were expected.</p>
   </div>
 </section>
 
