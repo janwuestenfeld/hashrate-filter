@@ -346,7 +346,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
     <h2>Our filter follows the hashrate without the daily luck of the raw estimate</h2>
     <p class="lede">Grey dots, joined by a thin line, are the raw estimate, the orange line is our filter and the dotted line the 3-day average. The 7-day average is hidden, and you can show it by clicking it in the legend. Drag across the chart to zoom, double-click to zoom out, and use the buttons below it to show the history since 2011.</p>
     <figure class="fig"><div id="ch-main" class="chart tall"></div></figure>
-    <p class="note">The green line is the two-sided version of our filter. It also uses the following seven days, so its last seven days (shaded, dotted) are not final and change as new days come in. Use the orange line for real-time work and the green line to look back at history. All other lines never change once published.</p>
+    <p class="note">The green line is the two-sided version of our filter. It also uses the following seven days, so its last seven days (shaded, dotted) are not final and change as new days come in. Use the orange line to follow the hashrate day by day and the green line to look back at history. All other lines never change once published.</p>
 
     <h3>Day by day, the raw estimate jumps up and down; our filter moves far less</h3>
     <p class="lede">The change from one day to the next, in percent: grey the raw estimate, orange our filter, green its two-sided version. The raw estimate moves by about $SD_RAW a day, our filter by about $SD_FILTER, 2011 to July 2026. This chart follows the zoom of the chart above.</p>
@@ -367,7 +367,7 @@ TEMPLATE = string.Template(r"""<!DOCTYPE html>
 
     <h2 class="gap">How our filter works</h2>
     <p class="lede">Bitcoin's protocol adjusts the difficulty every 2,016 blocks, about every two weeks, so that the network finds on average 144 blocks a day. Because blocks arrive as a Poisson process, the chance variation of a day's count follows from the expected count itself. On a 144-block day its standard deviation is the square root of 144, which is 12 blocks or 8.3%. A change from one day to the next combines the luck of two days, which gives the $SD_RAW of the raw estimate. Each day our filter moves part of the way from its previous estimate toward the day's raw estimate. When the day's blocks come faster in one part of the day than in the other, which points to a real change in hashrate, our filter moves further.</p>
-    <p class="lede">The two-sided version of our filter also uses the following seven days and removes $P_TWO of the luck, 2011 to July 2026. Use it to study the past. For real-time work, and as an input to models of how miners respond to price and fees, use our filter, which uses only the blocks up to each day.</p>
+    <p class="lede">The two-sided version of our filter also uses the following seven days and removes $P_TWO of the luck, 2011 to July 2026. Use it to study the past. To follow the hashrate day by day, and as an input to models of how miners respond to price and fees, use our filter, which uses only the blocks up to each day.</p>
   </div>
 </section>
 
